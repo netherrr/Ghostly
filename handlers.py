@@ -365,9 +365,19 @@ def detect_template_from_target(target: dict[str, Any] | None, lang: str) -> str
     text = str(target.get("text") or target.get("caption") or "")
     low = text.lower()
 
-    # Dynamic screens first. They contain live user values, so editing them
-    # should expose a protected template with variables, not freeze the values.
-    if any(x in low for x in ["статус захисту", "статус защиты", "protection status", "business-підключення", "business-подключение", "business connection", "збережено нових", "сохранено новых", "new messages saved"]):
+    # Static/specific screens first. Privacy and connection instructions can
+    # contain words like "Business-підключення", so they must not be mistaken
+    # for the dynamic Status screen.
+    if any(x in low for x in ["приватність", "приватность", "privacy", "forget_me", "видалити мої дані", "удалить мои данные", "видалення даних", "удаление данных", "не прошу код", "session string", "дані очищаються", "данные очищаются"]):
+        return f"privacy_{lang}"
+    if any(x in low for x in ["business-підключення активовано", "business-подключение актив", "business connection activated", "підключення активовано", "подключение активировано"]):
+        return f"business_connected_{lang}"
+    if any(x in low for x in ["як підключити", "как подключить", "how to connect", "chatbots", "чат-бот", "після підключення", "после подключения"]):
+        return f"connect_{lang}"
+
+    # Dynamic screens. Detect them only by clear screen markers, not by generic
+    # words like "Business", otherwise privacy/connect screens get misdetected.
+    if any(x in low for x in ["статус захисту", "статус защиты", "protection status", "збережено нових", "сохранено новых", "new messages saved", "видалених знайдено", "удалённых найдено", "deleted found"]):
         return f"status_{lang}"
     if any(x in low for x in ["тарифи ghostly", "тарифы ghostly", "ghostly guard plans", "plan:", "тариф:", "тарифи", "тарифы"]):
         return f"plans_{lang}"
@@ -375,13 +385,6 @@ def detect_template_from_target(target: dict[str, Any] | None, lang: str) -> str
         return f"keywords_{lang}"
     if any(x in low for x in ["останні видалені", "последние удал", "last deleted", "deleted found", "видалених повідомлень", "удалённых сообщений"]):
         return f"deleted_{lang}"
-
-    if any(x in low for x in ["як підключити", "как подключить", "how to connect", "telegram business", "chatbots", "чат-бот", "після підключення", "после подключения"]):
-        return f"connect_{lang}"
-    if any(x in low for x in ["business-підключення активовано", "business-подключение актив", "business connection activated", "підключення активовано", "подключение активировано"]):
-        return f"business_connected_{lang}"
-    if any(x in low for x in ["приватність", "приватность", "privacy", "forget_me", "видалити мої дані", "удалить мои данные", "видалення даних", "удаление данных"]):
-        return f"privacy_{lang}"
     if any(x in low for x in ["ghostly", "що я вмію", "что я умею", "what i can", "особистий захист", "личный защит", "telegram-чат"]):
         return f"start_{lang}"
     return None

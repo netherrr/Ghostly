@@ -202,26 +202,57 @@ class Database:
                     self.settings.default_lang,
                 )
 
+            # Paid access is one maximum tier (Pro). Different buttons are only
+            # different durations: 1 month, 3 months, 6 months, 1 year, lifetime.
+            # Old Basic/legacy monthly plans are disabled automatically.
             await con.execute(
                 """
-                INSERT INTO plans(code, name_uk, name_ru, name_en, features_uk, features_ru, features_en, price_usd, duration_days, position)
+                UPDATE plans
+                   SET is_active=FALSE, updated_at=NOW()
+                 WHERE code IN ('basic_month', 'pro_month')
+                """
+            )
+
+            await con.execute(
+                """
+                INSERT INTO plans(code, name_uk, name_ru, name_en, features_uk, features_ru, features_en, price_usd, duration_days, position, is_active)
                 VALUES
-                ('basic_month', 'Basic', 'Basic', 'Basic',
-                 '👻 Видалені повідомлення\n✏️ Історія редагувань\n🗄 Зберігання 7 днів',
-                 '👻 Удалённые сообщения\n✏️ История правок\n🗄 Хранение 7 дней',
-                 '👻 Deleted messages\n✏️ Edit history\n🗄 7-day storage',
-                 1.99, 30, 10),
-                ('pro_month', 'Pro', 'Pro', 'Pro',
-                 '👻 Безліміт видалених\n✏️ Історія редагувань\n🔎 Ключові слова\n🗄 Зберігання 30 днів',
-                 '👻 Безлимит удалённых\n✏️ История правок\n🔎 Ключевые слова\n🗄 Хранение 30 дней',
-                 '👻 Unlimited deleted messages\n✏️ Edit history\n🔎 Keywords\n🗄 30-day storage',
-                 3.99, 30, 20),
-                ('pro_90', 'Pro 90 днів', 'Pro 90 дней', 'Pro 90 days',
-                 '👻 Безліміт видалених\n✏️ Історія редагувань\n🗄 Зберігання 30 днів\n🔥 Вигідніше на 3 місяці',
-                 '👻 Безлимит удалённых\n✏️ История правок\n🗄 Хранение 30 дней\n🔥 Выгоднее на 3 месяца',
-                 '👻 Unlimited deleted messages\n✏️ Edit history\n🗄 30-day storage\n🔥 Better value for 3 months',
-                 9.99, 90, 30)
-                ON CONFLICT(code) DO NOTHING
+                ('pro_30', 'Pro на 1 місяць', 'Pro на 1 месяц', 'Pro 1 month',
+                 '👻 Усі видалені повідомлення\n✏️ Історія редагувань\n🔎 Ключові слова\n🛡 Антискам-сповіщення\n🗄 Зберігання 30 днів',
+                 '👻 Все удалённые сообщения\n✏️ История правок\n🔎 Ключевые слова\n🛡 Антискам-уведомления\n🗄 Хранение 30 дней',
+                 '👻 All deleted messages\n✏️ Edit history\n🔎 Keywords\n🛡 Anti-scam alerts\n🗄 30-day storage',
+                 3.99, 30, 10, TRUE),
+                ('pro_90', 'Pro на 3 місяці', 'Pro на 3 месяца', 'Pro 3 months',
+                 '👻 Усі видалені повідомлення\n✏️ Історія редагувань\n🔎 Ключові слова\n🛡 Антискам-сповіщення\n🔥 Вигідніше на 3 місяці',
+                 '👻 Все удалённые сообщения\n✏️ История правок\n🔎 Ключевые слова\n🛡 Антискам-уведомления\n🔥 Выгоднее на 3 месяца',
+                 '👻 All deleted messages\n✏️ Edit history\n🔎 Keywords\n🛡 Anti-scam alerts\n🔥 Better value for 3 months',
+                 9.99, 90, 20, TRUE),
+                ('pro_180', 'Pro на 6 місяців', 'Pro на 6 месяцев', 'Pro 6 months',
+                 '👻 Усі видалені повідомлення\n✏️ Історія редагувань\n🔎 Ключові слова\n🛡 Антискам-сповіщення\n💎 Найкраще для постійного користування',
+                 '👻 Все удалённые сообщения\n✏️ История правок\n🔎 Ключевые слова\n🛡 Антискам-уведомления\n💎 Лучший вариант для постоянного использования',
+                 '👻 All deleted messages\n✏️ Edit history\n🔎 Keywords\n🛡 Anti-scam alerts\n💎 Best for regular use',
+                 17.99, 180, 30, TRUE),
+                ('pro_365', 'Pro на 1 рік', 'Pro на 1 год', 'Pro 1 year',
+                 '👻 Усі видалені повідомлення\n✏️ Історія редагувань\n🔎 Ключові слова\n🛡 Антискам-сповіщення\n🏆 Максимальна вигода на рік',
+                 '👻 Все удалённые сообщения\n✏️ История правок\n🔎 Ключевые слова\n🛡 Антискам-уведомления\n🏆 Максимальная выгода на год',
+                 '👻 All deleted messages\n✏️ Edit history\n🔎 Keywords\n🛡 Anti-scam alerts\n🏆 Best yearly value',
+                 29.99, 365, 40, TRUE),
+                ('pro_lifetime', 'Pro назавжди', 'Pro навсегда', 'Pro lifetime',
+                 '👻 Усі видалені повідомлення\n✏️ Історія редагувань\n🔎 Ключові слова\n🛡 Антискам-сповіщення\n♾ Безлімітний доступ',
+                 '👻 Все удалённые сообщения\n✏️ История правок\n🔎 Ключевые слова\n🛡 Антискам-уведомления\n♾ Безлимитный доступ',
+                 '👻 All deleted messages\n✏️ Edit history\n🔎 Keywords\n🛡 Anti-scam alerts\n♾ Lifetime access',
+                 79.99, 36500, 50, TRUE)
+                ON CONFLICT(code) DO UPDATE SET
+                    name_uk=EXCLUDED.name_uk,
+                    name_ru=EXCLUDED.name_ru,
+                    name_en=EXCLUDED.name_en,
+                    features_uk=EXCLUDED.features_uk,
+                    features_ru=EXCLUDED.features_ru,
+                    features_en=EXCLUDED.features_en,
+                    duration_days=EXCLUDED.duration_days,
+                    position=EXCLUDED.position,
+                    is_active=TRUE,
+                    updated_at=NOW()
                 """
             )
 

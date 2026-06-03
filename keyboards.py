@@ -24,7 +24,7 @@ def main_menu(lang: str, is_admin: bool = False) -> dict[str, Any]:
 def lang_keyboard() -> dict[str, Any]:
     return inline([
         [("🇺🇦 Українська", "setlang:uk")],
-        [("🇷🇺 Русский", "setlang:ru")],
+        [("🏳️ Русский", "setlang:ru")],
         [("🇬🇧 English", "setlang:en")],
     ])
 
@@ -114,8 +114,8 @@ def admin_plan_keyboard(lang: str, plan_id: int, is_active: bool) -> dict[str, A
     return inline([
         [("💵 Ціна / Price", f"adm_set_plan:{plan_id}:price_usd"), ("📆 Дні / Days", f"adm_set_plan:{plan_id}:duration_days")],
         [("↕️ Позиція", f"adm_set_plan:{plan_id}:position")],
-        [("🇺🇦 Назва", f"adm_set_plan:{plan_id}:name_uk"), ("🇷🇺 Название", f"adm_set_plan:{plan_id}:name_ru"), ("🇬🇧 Name", f"adm_set_plan:{plan_id}:name_en")],
-        [("🇺🇦 Фічі", f"adm_set_plan:{plan_id}:features_uk"), ("🇷🇺 Фичи", f"adm_set_plan:{plan_id}:features_ru"), ("🇬🇧 Features", f"adm_set_plan:{plan_id}:features_en")],
+        [("🇺🇦 Назва", f"adm_set_plan:{plan_id}:name_uk"), ("🏳️ Название", f"adm_set_plan:{plan_id}:name_ru"), ("🇬🇧 Name", f"adm_set_plan:{plan_id}:name_en")],
+        [("🇺🇦 Фічі", f"adm_set_plan:{plan_id}:features_uk"), ("🏳️ Фичи", f"adm_set_plan:{plan_id}:features_ru"), ("🇬🇧 Features", f"adm_set_plan:{plan_id}:features_en")],
         [("✅ Увімкнено" if is_active else "⛔️ Вимкнено", f"adm_toggle_plan:{plan_id}")],
         [(btn(lang, "back"), "admin_plans")],
     ])
@@ -132,8 +132,8 @@ def admin_methods_keyboard(lang: str, methods: list[dict[str, Any]]) -> dict[str
 
 def admin_method_keyboard(lang: str, code: str, is_active: bool) -> dict[str, Any]:
     return inline([
-        [("🇺🇦 Назва", f"adm_set_method:{code}:title_uk"), ("🇷🇺 Название", f"adm_set_method:{code}:title_ru"), ("🇬🇧 Title", f"adm_set_method:{code}:title_en")],
-        [("🇺🇦 Реквізити", f"adm_set_method:{code}:instructions_uk"), ("🇷🇺 Реквизиты", f"adm_set_method:{code}:instructions_ru")],
+        [("🇺🇦 Назва", f"adm_set_method:{code}:title_uk"), ("🏳️ Название", f"adm_set_method:{code}:title_ru"), ("🇬🇧 Title", f"adm_set_method:{code}:title_en")],
+        [("🇺🇦 Реквізити", f"adm_set_method:{code}:instructions_uk"), ("🏳️ Реквизиты", f"adm_set_method:{code}:instructions_ru")],
         [("🇬🇧 Instructions", f"adm_set_method:{code}:instructions_en"), ("↕️ Позиція", f"adm_set_method:{code}:position")],
         [("✅ Увімкнено" if is_active else "⛔️ Вимкнено", f"adm_toggle_method:{code}")],
         [(btn(lang, "back"), "admin_methods")],
