@@ -944,7 +944,7 @@ class BotHandlers:
         if tpl:
             await self.send_template_screen(tg_id, tpl, lang_keyboard(), edit)
             return
-        await self.show_language_screen(tg_id, lang, edit)
+        await self._send_or_edit(tg_id, tr(lang, "choose_lang"), lang_keyboard(), edit)
 
     async def show_connect(self, tg_id: int, lang: str, edit: tuple[int, int] | None = None) -> None:
         video_url = await self.db.get_setting("connect_video_url", "")
