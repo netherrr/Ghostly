@@ -766,6 +766,14 @@ class BotHandlers:
         if media and media.get("file_id") and media.get("kind"):
             kind = str(media.get("kind"))
             file_id = str(media.get("file_id"))
+            # Best case: one clean media card. This also supports media-only
+            # templates with inline buttons and no caption at all.
+            if not text:
+                try:
+                    await self.bot.send_cached_media(tg_id, kind, file_id, None, keyboard)
+                    return
+                except Exception as exc:
+                    print("send media-only template failed:", repr(exc))
             # Telegram captions are limited. Keep a single card when possible.
             if text and len(text) <= 1024:
                 try:
@@ -773,6 +781,8 @@ class BotHandlers:
                     return
                 except Exception as exc:
                     print("send media template with caption failed:", repr(exc))
+            # Fallback for long captions or unsupported formatting: send media
+            # first and then the rich text with buttons separately.
             try:
                 await self.bot.send_cached_media(tg_id, kind, file_id)
             except Exception as exc:
@@ -780,7 +790,9 @@ class BotHandlers:
             if text:
                 await self.bot.send_message(tg_id, text, keyboard, entities=entities)
             elif keyboard:
-                await self.bot.send_message(tg_id, "⬇️", keyboard)
+                # Last-resort fallback. Normally media-only templates should be
+                # sent as one card above; this is only here if Telegram rejects it.
+                await self.bot.send_message(tg_id, "Відкрити нижче ⤵️", keyboard)
             return
         await self.bot.send_message(tg_id, text or "—", keyboard, entities=entities)
 
