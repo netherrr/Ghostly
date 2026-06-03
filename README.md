@@ -221,3 +221,37 @@ Quick mode also works:
 `/edit start Your new text here`
 
 Templates are language-specific. If your admin language is Ukrainian, `/edit start` saves `start_uk`. Switch language to RU/EN and repeat to save `start_ru` or `start_en`.
+
+## Professional template editor: text + media
+
+This build upgrades `/edit` into a reusable content/template editor.
+
+You can now save not only rich text and Premium emoji, but also media screens:
+
+- text-only templates;
+- photo + caption;
+- video + caption;
+- GIF/animation + caption;
+- document/file + caption.
+
+Recommended workflow:
+
+1. Open the screen you want to polish: `/start`, “How to connect”, Privacy, etc.
+2. Reply to that bot message with `/edit`.
+3. Send the final content as one message:
+   - rich text with Premium emoji, or
+   - photo/video/GIF/file with caption.
+4. The bot updates the current screen and saves the reusable template in DB.
+
+Explicit template commands:
+
+- `/edit start` — save welcome screen for the current language;
+- `/edit connect` — save “How to connect” screen;
+- `/edit business` — save successful Business connection screen;
+- `/edit privacy` — save privacy screen.
+
+Important notes:
+
+- Auto-detection now checks connect/privacy/business screens before the generic start screen, so “How to connect Ghostly” will no longer be saved as `start_uk` by mistake.
+- Telegram media captions have a 1024-character limit. If your caption is longer, the bot sends media first and then sends the rich text with buttons as a separate message.
+- To remove media from a template, reply to the media screen with `/edit` and send text-only replacement content.

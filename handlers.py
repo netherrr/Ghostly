@@ -233,21 +233,21 @@ def strip_accidental_edit_prefix(text: str, entities: list[dict[str, Any]]) -> t
 def detect_template_from_target(target: dict[str, Any] | None, lang: str) -> str | None:
     """Auto-detect which reusable template an edited bot message belongs to.
 
-    This makes the UX simple: reply to the visible bot message with `/edit new text`,
-    and if it looks like a known screen, we save it permanently for future use.
+    Order matters: connect/privacy/business screens may also contain the brand name,
+    so specific screens must be checked before the generic start screen.
     """
     if not target:
         return None
     text = str(target.get("text") or target.get("caption") or "")
     low = text.lower()
+    if any(x in low for x in ["як підключити", "как подключить", "how to connect", "telegram business", "chatbots", "чат-бот", "після підключення", "после подключения"]):
+        return f"connect_{lang}"
+    if any(x in low for x in ["business-підключення активовано", "business-подключение актив", "business connection activated", "підключення активовано", "подключение активировано"]):
+        return f"business_connected_{lang}"
+    if any(x in low for x in ["приватність", "приватность", "privacy", "forget_me", "видалити мої дані", "удалить мои данные", "видалення даних", "удаление данных"]):
+        return f"privacy_{lang}"
     if any(x in low for x in ["ghostly", "що я вмію", "что я умею", "what i can", "особистий захист", "личный защит", "telegram-чат"]):
         return f"start_{lang}"
-    if any(x in low for x in ["як підключити", "как подключить", "how to connect", "telegram business", "chatbots", "чат-бот"]):
-        return f"connect_{lang}"
-    if any(x in low for x in ["business-підключення активовано", "business-подключение актив", "business connection activated"]):
-        return f"business_connected_{lang}"
-    if any(x in low for x in ["приватність", "приватность", "privacy", "forget_me", "видалити мої дані", "удалить мои данные"]):
-        return f"privacy_{lang}"
     return None
 
 
@@ -258,6 +258,21 @@ def message_text_and_entities(msg: dict[str, Any]) -> tuple[str, list[dict[str, 
     if msg.get("caption") is not None:
         return msg.get("caption") or "", clean_entities_for_edit(msg.get("caption_entities") or [], 0)
     return "", []
+
+
+def edit_content_from_message(msg: dict[str, Any]) -> tuple[str, list[dict[str, Any]], dict[str, Any] | None]:
+    """Return replacement text/entities and optional media for the admin template editor.
+
+    Supports: text-only, photo+caption, video+caption, animation+caption and document+caption.
+    Premium custom emoji and rich formatting are preserved through Telegram entities.
+    """
+    text, entities = message_text_and_entities(msg)
+    media = extract_message_attachment(msg)
+    if media.get("kind") not in {"photo", "video", "animation", "document"} or not media.get("file_id"):
+        media_obj = None
+    else:
+        media_obj = {"kind": media.get("kind"), "file_id": media.get("file_id")}
+    return text, entities, media_obj
 
 
 def target_edit_mode(target: dict[str, Any] | None) -> str:
@@ -293,10 +308,10 @@ def state_prompt(lang: str, state: str, payload: dict[str, Any]) -> str:
         template_key = payload.get("template_key")
         if template_key:
             return (
-                f"✏️ Надішли новий текст для шаблону <code>{e(template_key)}</code>.\n"
-                "Я оновлю поточне повідомлення і збережу цей текст для майбутніх показів."
+                f"✏️ Надішли новий контент для шаблону <code>{e(template_key)}</code>.\n"
+                "Можна надіслати текст, фото з підписом, відео з підписом, GIF або файл. Я оновлю поточний екран і збережу його для майбутніх показів."
             )
-        return "✏️ Надішли новий текст для повідомлення. Можна використовувати Premium emoji, жирний, курсив, посилання та перенос рядків."
+        return "✏️ Надішли новий контент для повідомлення: текст або фото/відео/GIF/файл з підписом. Premium emoji, жирний, курсив, посилання та перенос рядків збережуться."
     if state == "admin_create_plan":
         return "➕ Надішли новий тариф у форматі:\n<code>code price days Назва тарифу</code>\n\nПриклад:\n<code>vip_week 0.99 7 VIP 7 днів</code>"
     return "Надішли значення або натисни Скасувати."
@@ -413,8 +428,9 @@ class BotHandlers:
                 "✏️ <b>/edit</b> працює тільки відповіддю на повідомлення бота.\n\n"
                 "Як користуватись:\n"
                 "1. Відповідай на потрібне повідомлення командою <code>/edit</code>.\n"
-                "2. Потім надішли новий текст з Premium emoji / форматуванням.\n\n"
-                "Швидкий варіант: <code>/edit Новий текст</code>",
+                "2. Потім надішли новий текст або фото/відео/GIF/файл з підписом.\n\n"
+                "Швидкий варіант для тексту: <code>/edit Новий текст</code>\n"
+                "Я сам визначу шаблон: start / connect / privacy / business.",
             )
             return
 
@@ -446,8 +462,8 @@ class BotHandlers:
             await self.bot.send_message(
                 tg_id,
                 "✏️ <b>Режим редагування увімкнено.</b>\n\n"
-                "Тепер надішли <b>тільки новий текст</b> одним повідомленням — без /edit на початку.\n"
-                "Premium emoji, жирний/курсивний текст, посилання і перенос рядків збережуться."
+                "Тепер надішли <b>новий контент</b> одним повідомленням — без /edit на початку.\n"
+                "Це може бути текст або фото/відео/GIF/файл з підписом. Premium emoji, жирний/курсивний текст, посилання і перенос рядків збережуться."
                 f"{extra}\n\n"
                 "Скасувати: /start",
             )
@@ -457,12 +473,12 @@ class BotHandlers:
 
     async def handle_admin_edit_content(self, tg_id: int, lang: str, msg: dict[str, Any], state_row: dict[str, Any]) -> None:
         payload = state_row.get("payload") or {}
-        text, entities = message_text_and_entities(msg)
+        text, entities, media = edit_content_from_message(msg)
         text, entities = strip_accidental_edit_prefix(text, entities)
-        if not text.strip():
+        if not text.strip() and not media:
             await self.bot.send_message(tg_id, state_prompt(lang, "admin_edit_message", payload), cancel_keyboard(lang, "admin"))
             return
-        await self.perform_admin_edit(tg_id, lang, payload, text, entities)
+        await self.perform_admin_edit(tg_id, lang, payload, text, entities, media)
 
     async def perform_admin_edit(
         self,
@@ -471,34 +487,56 @@ class BotHandlers:
         payload: dict[str, Any],
         text: str,
         entities: list[dict[str, Any]] | None,
+        media: dict[str, Any] | None = None,
     ) -> None:
         target_chat_id = int(payload.get("target_chat_id") or tg_id)
         target_message_id = int(payload.get("target_message_id") or 0)
         mode = str(payload.get("mode") or "text")
         reply_markup = payload.get("reply_markup")
-        if not target_message_id:
+        template_key = payload.get("template_key")
+        if not target_message_id and not template_key:
             await self.db.clear_state(tg_id)
             await self.bot.send_message(tg_id, "❌ Не знайшов повідомлення для редагування. Спробуй ще раз: reply → /edit")
             return
 
         try:
-            if mode == "caption":
-                await self.bot.edit_message_caption(target_chat_id, target_message_id, text, reply_markup=reply_markup, caption_entities=entities or [])
+            # If admin sends media, Telegram cannot reliably convert an existing text
+            # message into a media message. We replace the visible screen cleanly:
+            # delete old bot message and send a new media/text screen with the same buttons.
+            if media:
+                if target_message_id:
+                    try:
+                        await self.bot.delete_message(target_chat_id, target_message_id)
+                    except Exception:
+                        pass
+                await self.send_template_content(tg_id, text, entities or [], media, reply_markup)
             else:
-                await self.bot.edit_message_text(target_chat_id, target_message_id, text, reply_markup=reply_markup, entities=entities or [])
-            template_key = payload.get("template_key")
+                if mode == "caption" and template_key:
+                    # Admin is turning a media screen back into a text-only template.
+                    # Delete the old media message and send a clean text message with buttons.
+                    try:
+                        await self.bot.delete_message(target_chat_id, target_message_id)
+                    except Exception:
+                        pass
+                    await self.send_template_content(tg_id, text, entities or [], None, reply_markup)
+                elif mode == "caption":
+                    await self.bot.edit_message_caption(target_chat_id, target_message_id, text, reply_markup=reply_markup, caption_entities=entities or [])
+                else:
+                    await self.bot.edit_message_text(target_chat_id, target_message_id, text, reply_markup=reply_markup, entities=entities or [])
+
             if template_key:
-                await self.db.set_template(str(template_key), text, entities or [])
+                await self.db.set_template(str(template_key), text, entities or [], media)
             await self.db.clear_state(tg_id)
+            media_line = "\n📎 <b>Медіа збережено разом із шаблоном.</b>" if media else ""
             saved_line = (
-                f"\n\n🧩 <b>Шаблон збережено:</b> <code>{e(template_key)}</code>. Тепер /start або відповідний розділ буде показувати саме цей текст."
+                f"\n\n🧩 <b>Шаблон збережено:</b> <code>{e(template_key)}</code>. Тепер /start або відповідний розділ буде показувати саме цей контент."
                 if template_key else "\n\nℹ️ Це було разове редагування. Для постійного збереження відповідай на екран /start або пиши <code>/edit start</code>."
             )
             await self.bot.send_message(
                 tg_id,
                 "✅ <b>Повідомлення оновлено.</b>"
-                f"{saved_line}\n\n"
-                "Premium emoji та форматування збережені, якщо Telegram дозволив їх використати для цього бота.",
+                f"{saved_line}{media_line}\n\n"
+                "Premium emoji, форматування, фото/відео збережені, якщо Telegram дозволив їх використати для цього бота.",
             )
         except Exception as exc:
             await self.db.clear_state(tg_id)
@@ -509,6 +547,7 @@ class BotHandlers:
                 "• це повідомлення надіслав не цей бот;\n"
                 "• воно занадто старе або Telegram не дозволяє його редагувати;\n"
                 "• текст/emoji має некоректне форматування;\n"
+                "• caption під медіа довший за ліміт Telegram, тоді я спробую відправити медіа + текст окремо;\n"
                 "• ти відповів не на те повідомлення.\n\n"
                 f"Технічна помилка:\n<code>{e(repr(exc))}</code>",
             )
@@ -600,7 +639,7 @@ class BotHandlers:
     async def show_start(self, tg_id: int, lang: str, is_admin: bool) -> None:
         tpl = await self.db.get_template(f"start_{lang}")
         if tpl:
-            await self.bot.send_message(tg_id, tpl["text"], main_menu(lang, is_admin), entities=tpl.get("entities") or [])
+            await self.send_template_screen(tg_id, tpl, main_menu(lang, is_admin))
             return
         await self.bot.send_message(tg_id, tr(lang, "start", app=e(self.settings.app_name)), main_menu(lang, is_admin))
 
@@ -610,16 +649,21 @@ class BotHandlers:
         video_kind = await self.db.get_setting("connect_video_kind", "video")
         tpl = await self.db.get_template(f"connect_{lang}")
         if tpl:
-            text = tpl["text"]
-            entities = tpl.get("entities") or []
+            # Custom connect template may include its own photo/video.
+            if video_url and not tpl.get("media"):
+                label = "🎬 Video guide" if lang == "en" else "🎬 Видео-инструкция" if lang == "ru" else "🎬 Відео-інструкція"
+                tpl = dict(tpl)
+                tpl["text"] = f"{tpl.get('text') or ''}\n\n{label}: {e(video_url)}"
+                tpl["entities"] = []
+            await self.send_template_screen(tg_id, tpl, back_menu(lang), edit)
         else:
             text = tr(lang, "connect", app=e(self.settings.app_name))
             entities = None
-        if video_url:
-            label = "🎬 Video guide" if lang == "en" else "🎬 Видео-инструкция" if lang == "ru" else "🎬 Відео-інструкція"
-            text += f"\n\n{label}: {e(video_url)}"
-            entities = None  # keep appended URL safe with HTML fallback
-        await self._send_or_edit(tg_id, text, back_menu(lang), edit, entities=entities)
+            if video_url:
+                label = "🎬 Video guide" if lang == "en" else "🎬 Видео-инструкция" if lang == "ru" else "🎬 Відео-інструкція"
+                text += f"\n\n{label}: {e(video_url)}"
+                entities = None
+            await self._send_or_edit(tg_id, text, back_menu(lang), edit, entities=entities)
         if video_file_id:
             caption = "🎬 Video guide" if lang == "en" else "🎬 Видео-инструкция" if lang == "ru" else "🎬 Відео-інструкція"
             try:
@@ -704,6 +748,63 @@ class BotHandlers:
                 pass
         await self.bot.send_message(tg_id, text, keyboard, entities=entities)
 
+    async def send_template_content(
+        self,
+        tg_id: int,
+        text: str,
+        entities: list[dict[str, Any]] | None,
+        media: dict[str, Any] | None,
+        keyboard: dict[str, Any] | None = None,
+    ) -> None:
+        """Send a reusable content screen.
+
+        If the template has media and the text is short, we use a polished single
+        media card with caption + buttons. If caption is too long for Telegram,
+        we send media first and the rich text with buttons as a second message.
+        """
+        entities = entities or []
+        if media and media.get("file_id") and media.get("kind"):
+            kind = str(media.get("kind"))
+            file_id = str(media.get("file_id"))
+            # Telegram captions are limited. Keep a single card when possible.
+            if text and len(text) <= 1024:
+                try:
+                    await self.bot.send_cached_media(tg_id, kind, file_id, text, keyboard, caption_entities=entities)
+                    return
+                except Exception as exc:
+                    print("send media template with caption failed:", repr(exc))
+            try:
+                await self.bot.send_cached_media(tg_id, kind, file_id)
+            except Exception as exc:
+                print("send media template failed:", repr(exc))
+            if text:
+                await self.bot.send_message(tg_id, text, keyboard, entities=entities)
+            elif keyboard:
+                await self.bot.send_message(tg_id, "⬇️", keyboard)
+            return
+        await self.bot.send_message(tg_id, text or "—", keyboard, entities=entities)
+
+    async def send_template_screen(
+        self,
+        tg_id: int,
+        tpl: dict[str, Any],
+        keyboard: dict[str, Any] | None = None,
+        edit: tuple[int, int] | None = None,
+    ) -> None:
+        media = tpl.get("media")
+        text = str(tpl.get("text") or "")
+        entities = tpl.get("entities") or []
+        if media:
+            if edit:
+                chat_id, message_id = edit
+                try:
+                    await self.bot.delete_message(chat_id, message_id)
+                except Exception:
+                    pass
+            await self.send_template_content(tg_id, text, entities, media, keyboard)
+            return
+        await self._send_or_edit(tg_id, text, keyboard, edit, entities=entities)
+
     async def handle_callback(self, cb: dict[str, Any]) -> None:
         cb_id = cb.get("id")
         from_user = cb.get("from") or {}
@@ -749,7 +850,7 @@ class BotHandlers:
         elif data == "privacy":
             tpl = await self.db.get_template(f"privacy_{lang}")
             if tpl:
-                await self._send_or_edit(tg_id, tpl["text"], back_menu(lang), edit, entities=tpl.get("entities") or [])
+                await self.send_template_screen(tg_id, tpl, back_menu(lang), edit)
             else:
                 await self._send_or_edit(tg_id, tr(lang, "privacy"), back_menu(lang), edit)
         elif data == "lang":
@@ -1121,7 +1222,7 @@ class BotHandlers:
             if conn.get("is_enabled"):
                 tpl = await self.db.get_template(f"business_connected_{lang}")
                 if tpl:
-                    await self.bot.send_message(owner_id, tpl["text"], main_menu(lang, await self.db.is_admin(owner_id)), entities=tpl.get("entities") or [])
+                    await self.send_template_screen(owner_id, tpl, main_menu(lang, await self.db.is_admin(owner_id)))
                 else:
                     await self.bot.send_message(owner_id, tr(lang, "business_connected"), main_menu(lang, await self.db.is_admin(owner_id)))
             else:

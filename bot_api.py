@@ -145,7 +145,18 @@ class BotAPI:
             payload["reply_markup"] = reply_markup
         return await self.request("copyMessage", payload)
 
-    async def send_cached_media(self, chat_id: int, kind: str, file_id: str, caption: str | None = None) -> dict[str, Any]:
+    async def delete_message(self, chat_id: int | str, message_id: int) -> dict[str, Any]:
+        return await self.request("deleteMessage", {"chat_id": chat_id, "message_id": message_id})
+
+    async def send_cached_media(
+        self,
+        chat_id: int | str,
+        kind: str,
+        file_id: str,
+        caption: str | None = None,
+        reply_markup: dict[str, Any] | None = None,
+        caption_entities: list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
         method_map = {
             "photo": "sendPhoto",
             "video": "sendVideo",
@@ -160,7 +171,13 @@ class BotAPI:
         if not method:
             raise TelegramAPIError(f"Unsupported cached media kind: {kind}")
         field = "photo" if kind == "photo" else kind
-        payload: dict[str, Any] = {"chat_id": chat_id, field: file_id, "parse_mode": "HTML"}
+        payload: dict[str, Any] = {"chat_id": chat_id, field: file_id}
         if caption and kind not in {"video_note", "sticker"}:
             payload["caption"] = caption[:1024]
+            if caption_entities is not None:
+                payload["caption_entities"] = caption_entities
+            else:
+                payload["parse_mode"] = "HTML"
+        if reply_markup:
+            payload["reply_markup"] = reply_markup
         return await self.request(method, payload)

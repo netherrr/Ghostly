@@ -761,8 +761,19 @@ class Database:
         val = await self.get_setting(key, default)
         return int(val)
 
-    async def set_template(self, key: str, text: str, entities: list[dict[str, Any]] | None = None) -> None:
-        payload = {"text": text, "entities": entities or []}
+    async def set_template(
+        self,
+        key: str,
+        text: str,
+        entities: list[dict[str, Any]] | None = None,
+        media: dict[str, Any] | None = None,
+    ) -> None:
+        payload = {"text": text or "", "entities": entities or []}
+        if media and media.get("file_id") and media.get("kind"):
+            payload["media"] = {
+                "kind": str(media.get("kind")),
+                "file_id": str(media.get("file_id")),
+            }
         await self.set_setting(f"template_{key}", payload)
 
     async def get_template(self, key: str) -> dict[str, Any] | None:
@@ -772,7 +783,10 @@ class Database:
             entities = value.get("entities") or []
             if not isinstance(entities, list):
                 entities = []
-            return {"text": value.get("text") or "", "entities": entities}
+            media = value.get("media") or None
+            if not isinstance(media, dict) or not media.get("file_id") or not media.get("kind"):
+                media = None
+            return {"text": value.get("text") or "", "entities": entities, "media": media}
         return None
 
     async def set_state(self, user_id: int, state: str, payload: dict[str, Any] | None = None) -> None:
