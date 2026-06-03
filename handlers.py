@@ -122,7 +122,131 @@ TEMPLATE_ALIASES = {
     "privacy": "privacy",
     "приватність": "privacy",
     "приватность": "privacy",
+
+    # Dynamic screens. These are edited as protected templates with variables.
+    "status": "status",
+    "статус": "status",
+    "plans": "plans",
+    "tariffs": "plans",
+    "тарифи": "plans",
+    "тарифы": "plans",
+    "subscription": "subscription",
+    "підписка": "subscription",
+    "подписка": "subscription",
+    "keywords": "keywords",
+    "ключові": "keywords",
+    "ключевые": "keywords",
+    "deleted": "deleted",
+    "видалені": "deleted",
+    "удаленные": "deleted",
+    "удалённые": "deleted",
 }
+
+DYNAMIC_TEMPLATE_SPECS = {
+    "status": {
+        "vars": ["plan_name", "business_status", "saved_count", "deleted_count", "status_hint"],
+        "default": {
+            "uk": "🛡 Статус захисту\n\n💎 Підписка: {plan_name}\n🔌 Business-підключення: {business_status}\n💬 Збережено нових повідомлень: {saved_count}\n👻 Видалених знайдено: {deleted_count}\n\n{status_hint}",
+            "ru": "🛡 Статус защиты\n\n💎 Подписка: {plan_name}\n🔌 Business-подключение: {business_status}\n💬 Сохранено новых сообщений: {saved_count}\n👻 Удалённых найдено: {deleted_count}\n\n{status_hint}",
+            "en": "🛡 Protection status\n\n💎 Subscription: {plan_name}\n🔌 Business connection: {business_status}\n💬 New messages saved: {saved_count}\n👻 Deleted found: {deleted_count}\n\n{status_hint}",
+        },
+    },
+    "plans": {
+        "vars": ["plans_list"],
+        "default": {
+            "uk": "💎 Тарифи Ghostly Guard\n\n{plans_list}",
+            "ru": "💎 Тарифы Ghostly Guard\n\n{plans_list}",
+            "en": "💎 Ghostly Guard plans\n\n{plans_list}",
+        },
+    },
+    "keywords": {
+        "vars": ["keywords_list", "keywords_count", "keywords_hint"],
+        "default": {
+            "uk": "🔎 Сповіщення за ключовими словами\n\nСлів: {keywords_count}\n\n{keywords_list}\n\n{keywords_hint}",
+            "ru": "🔎 Оповещения по ключевым словам\n\nСлов: {keywords_count}\n\n{keywords_list}\n\n{keywords_hint}",
+            "en": "🔎 Keyword alerts\n\nKeywords: {keywords_count}\n\n{keywords_list}\n\n{keywords_hint}",
+        },
+    },
+    "deleted": {
+        "vars": ["deleted_messages_list", "deleted_count"],
+        "default": {
+            "uk": "👻 Останні видалені\n\nЗнайдено: {deleted_count}\n\n{deleted_messages_list}",
+            "ru": "👻 Последние удалённые\n\nНайдено: {deleted_count}\n\n{deleted_messages_list}",
+            "en": "👻 Last deleted\n\nFound: {deleted_count}\n\n{deleted_messages_list}",
+        },
+    },
+}
+
+
+def template_base(key: str | None) -> str:
+    if not key:
+        return ""
+    return str(key).rsplit("_", 1)[0]
+
+
+def is_dynamic_template_key(key: str | None) -> bool:
+    return template_base(key) in DYNAMIC_TEMPLATE_SPECS
+
+
+def dynamic_template_default(base: str, lang: str) -> str:
+    spec = DYNAMIC_TEMPLATE_SPECS.get(base) or {}
+    default = spec.get("default") or {}
+    return str(default.get(lang) or default.get("uk") or "")
+
+
+def dynamic_required_vars(base: str) -> list[str]:
+    spec = DYNAMIC_TEMPLATE_SPECS.get(base) or {}
+    return list(spec.get("vars") or [])
+
+
+def missing_dynamic_vars(base: str, text: str) -> list[str]:
+    return [v for v in dynamic_required_vars(base) if "{" + v + "}" not in (text or "")]
+
+
+def render_dynamic_template(text: str, entities: list[dict[str, Any]] | None, values: dict[str, str]) -> tuple[str, list[dict[str, Any]]]:
+    """Replace {variables} and keep Telegram entity offsets valid."""
+    entities = [dict(x) for x in (entities or []) if isinstance(x, dict)]
+    source = text or ""
+    repls: list[tuple[int, int, int]] = []
+    for m in re.finditer(r"\{([a-zA-Z0-9_]+)\}", source):
+        name = m.group(1)
+        if name not in values:
+            continue
+        old_token = m.group(0)
+        new_val = str(values.get(name) or "")
+        repls.append((utf16_len(source[:m.start()]), utf16_len(old_token), utf16_len(new_val)))
+
+    rendered = source
+    for name, value in values.items():
+        rendered = rendered.replace("{" + name + "}", str(value or ""))
+
+    if not repls:
+        return rendered, entities
+
+    adjusted: list[dict[str, Any]] = []
+    for ent in entities:
+        try:
+            off = int(ent.get("offset", 0))
+            length = int(ent.get("length", 0))
+        except Exception:
+            continue
+        end = off + length
+        shift = 0
+        drop = False
+        for start, old_len, new_len in repls:
+            old_end = start + old_len
+            if end <= start:
+                continue
+            if off >= old_end:
+                shift += new_len - old_len
+                continue
+            drop = True
+            break
+        if drop:
+            continue
+        ent["offset"] = off + shift
+        adjusted.append(ent)
+    return rendered, adjusted
 
 
 def utf16_len(text: str) -> int:
@@ -240,6 +364,18 @@ def detect_template_from_target(target: dict[str, Any] | None, lang: str) -> str
         return None
     text = str(target.get("text") or target.get("caption") or "")
     low = text.lower()
+
+    # Dynamic screens first. They contain live user values, so editing them
+    # should expose a protected template with variables, not freeze the values.
+    if any(x in low for x in ["статус захисту", "статус защиты", "protection status", "business-підключення", "business-подключение", "business connection", "збережено нових", "сохранено новых", "new messages saved"]):
+        return f"status_{lang}"
+    if any(x in low for x in ["тарифи ghostly", "тарифы ghostly", "ghostly guard plans", "plan:", "тариф:", "тарифи", "тарифы"]):
+        return f"plans_{lang}"
+    if any(x in low for x in ["ключовими словами", "ключевым словам", "keyword alerts", "keywords:", "слів:", "слов:"]):
+        return f"keywords_{lang}"
+    if any(x in low for x in ["останні видалені", "последние удал", "last deleted", "deleted found", "видалених повідомлень", "удалённых сообщений"]):
+        return f"deleted_{lang}"
+
     if any(x in low for x in ["як підключити", "как подключить", "how to connect", "telegram business", "chatbots", "чат-бот", "після підключення", "после подключения"]):
         return f"connect_{lang}"
     if any(x in low for x in ["business-підключення активовано", "business-подключение актив", "business connection activated", "підключення активовано", "подключение активировано"]):
@@ -456,7 +592,19 @@ class BotHandlers:
         if not new_text.strip():
             await self.db.set_state(tg_id, "admin_edit_message", payload)
             if template_key:
-                extra = f"\n\n🧩 <b>Я визначив цей екран як шаблон:</b> <code>{e(template_key)}</code>. Новий текст збережу назавжди."
+                extra = f"\n\n🧩 <b>Я визначив цей екран як шаблон:</b> <code>{e(template_key)}</code>. Новий контент збережу назавжди."
+                if is_dynamic_template_key(template_key):
+                    base = template_base(template_key)
+                    current_tpl = await self.db.get_template(template_key)
+                    editable = str((current_tpl or {}).get("text") or dynamic_template_default(base, lang))
+                    protected = " ".join(["{" + v + "}" for v in dynamic_required_vars(base)])
+                    extra += (
+                        "\n\n🔒 <b>Це динамічний екран.</b> Я підставляю живі дані користувача через змінні."
+                        "\nНе видаляй ці змінні, інакше я не збережу шаблон:"
+                        f"\n<code>{e(protected)}</code>"
+                        "\n\n📋 <b>Поточний шаблон для копіювання:</b>"
+                        f"\n<pre>{e(editable)}</pre>"
+                    )
             else:
                 extra = "\n\nℹ️ Це буде разове редагування конкретного повідомлення."
             await self.bot.send_message(
@@ -498,6 +646,34 @@ class BotHandlers:
             await self.db.clear_state(tg_id)
             await self.bot.send_message(tg_id, "❌ Не знайшов повідомлення для редагування. Спробуй ще раз: reply → /edit")
             return
+
+        # Dynamic screens must keep their protected variables so every user sees
+        # their own live values. Media is allowed, but text cannot be empty for
+        # dynamic screens because otherwise the live data disappears.
+        if template_key and is_dynamic_template_key(template_key):
+            base = template_base(template_key)
+            if not (text or "").strip():
+                current_tpl = await self.db.get_template(str(template_key))
+                editable = str((current_tpl or {}).get("text") or dynamic_template_default(base, lang))
+                await self.bot.send_message(
+                    tg_id,
+                    "⚠️ <b>Це динамічний екран.</b> Тут не можна залишити тільки медіа, бо зникнуть живі дані користувача.\n\n"
+                    "Скопіюй шаблон нижче, зміни тільки оформлення/текст, але залиш змінні у фігурних дужках:"
+                    f"\n<pre>{e(editable)}</pre>",
+                )
+                return
+            missing = missing_dynamic_vars(base, text)
+            if missing:
+                protected = " ".join(["{" + v + "}" for v in dynamic_required_vars(base)])
+                await self.bot.send_message(
+                    tg_id,
+                    "⚠️ <b>Я не зберіг шаблон, бо ти випадково прибрав технічні змінні.</b>\n\n"
+                    f"Не можна видаляти: <code>{e(', '.join('{' + v + '}' for v in missing))}</code>\n\n"
+                    "Повний список змінних для цього екрана:"
+                    f"\n<code>{e(protected)}</code>\n\n"
+                    "Встав їх назад і надішли текст ще раз.",
+                )
+                return
 
         try:
             # If admin sends media, Telegram cannot reliably convert an existing text
@@ -681,14 +857,55 @@ class BotHandlers:
         has_business = await self.db.user_has_business(tg_id)
         business_status = tr(lang, "business_on") if has_business else tr(lang, "business_off")
         hint = tr(lang, "status_hint_ok") if has_business else tr(lang, "status_hint_connect")
+
+        tpl = await self.db.get_template(f"status_{lang}")
+        if tpl:
+            values = {
+                "plan_name": sub_status,
+                "business_status": business_status,
+                "saved_count": str(saved),
+                "deleted_count": str(deleted),
+                "status_hint": hint,
+            }
+            rendered, ents = render_dynamic_template(str(tpl.get("text") or ""), tpl.get("entities") or [], values)
+            media = tpl.get("media")
+            if media:
+                if edit:
+                    chat_id, message_id = edit
+                    try:
+                        await self.bot.delete_message(chat_id, message_id)
+                    except Exception:
+                        pass
+                await self.send_template_content(tg_id, rendered, ents, media, back_menu(lang))
+            else:
+                await self._send_or_edit(tg_id, rendered, back_menu(lang), edit, entities=ents)
+            return
+
         text = tr(lang, "status", sub_status=e(sub_status), business_status=e(business_status), saved=saved, deleted=deleted, hint=e(hint))
         await self._send_or_edit(tg_id, text, back_menu(lang), edit)
 
     async def show_plans(self, tg_id: int, lang: str, edit: tuple[int, int] | None = None) -> None:
         plans = await self.db.plans(active_only=True)
-        lines = [tr(lang, "plans_title")]
+        plan_lines = []
         for p in plans:
-            lines.append(tr(lang, "plan_line", name=e(plan_name(p, lang)), price=e(p["price_usd"]), days=p["duration_days"], features=e(plan_features(p, lang)).replace("\n", "\n")))
+            plan_lines.append(tr(lang, "plan_line", name=e(plan_name(p, lang)), price=e(p["price_usd"]), days=p["duration_days"], features=e(plan_features(p, lang)).replace("\n", "\n")))
+        tpl = await self.db.get_template(f"plans_{lang}")
+        if tpl:
+            values = {"plans_list": "\n\n".join(plan_lines)}
+            rendered, ents = render_dynamic_template(str(tpl.get("text") or ""), tpl.get("entities") or [], values)
+            media = tpl.get("media")
+            if media:
+                if edit:
+                    chat_id, message_id = edit
+                    try:
+                        await self.bot.delete_message(chat_id, message_id)
+                    except Exception:
+                        pass
+                await self.send_template_content(tg_id, rendered, ents, media, plans_keyboard(lang, plans))
+            else:
+                await self._send_or_edit(tg_id, rendered, plans_keyboard(lang, plans), edit, entities=ents)
+            return
+        lines = [tr(lang, "plans_title"), *plan_lines]
         await self._send_or_edit(tg_id, "\n\n".join(lines), plans_keyboard(lang, plans), edit)
 
     async def show_admin(self, tg_id: int, lang: str, edit: tuple[int, int] | None = None) -> None:
@@ -703,6 +920,28 @@ class BotHandlers:
         empty = "No keywords yet." if lang == "en" else "Ключевых слов пока нет." if lang == "ru" else "Ключових слів поки немає."
         body = "\n".join([f"• <code>{e(w)}</code>" for w in words]) if words else empty
         hint = "Press buttons below to add or remove keywords." if lang == "en" else "Нажимай кнопки ниже, чтобы добавлять или удалять слова." if lang == "ru" else "Натискай кнопки нижче, щоб додавати або видаляти слова."
+
+        tpl = await self.db.get_template(f"keywords_{lang}")
+        if tpl:
+            values = {
+                "keywords_list": body,
+                "keywords_count": str(len(words)),
+                "keywords_hint": hint,
+            }
+            rendered, ents = render_dynamic_template(str(tpl.get("text") or ""), tpl.get("entities") or [], values)
+            media = tpl.get("media")
+            if media:
+                if edit:
+                    chat_id, message_id = edit
+                    try:
+                        await self.bot.delete_message(chat_id, message_id)
+                    except Exception:
+                        pass
+                await self.send_template_content(tg_id, rendered, ents, media, keywords_keyboard(lang, words))
+            else:
+                await self._send_or_edit(tg_id, rendered, keywords_keyboard(lang, words), edit, entities=ents)
+            return
+
         await self._send_or_edit(tg_id, f"{title}\n\n{body}\n\n{hint}", keywords_keyboard(lang, words), edit)
 
     async def show_keyword_delete_menu(self, tg_id: int, lang: str, edit: tuple[int, int] | None = None) -> None:
@@ -722,14 +961,37 @@ class BotHandlers:
             )
         rows = [dict(r) for r in rows]
         if not rows:
-            msg = "No deleted messages yet." if lang == "en" else "Удалённых сообщений пока нет." if lang == "ru" else "Видалених повідомлень поки немає."
-            await self._send_or_edit(tg_id, msg, back_menu(lang), edit)
+            deleted_list = "No deleted messages yet." if lang == "en" else "Удалённых сообщений пока нет." if lang == "ru" else "Видалених повідомлень поки немає."
+        else:
+            item_lines = []
+            for r in rows:
+                body = r.get("text") or r.get("caption") or f"[{r.get('content_type') or 'unknown'}]"
+                item_lines.append(f"<b>{e(r.get('chat_title') or '')}</b> — {e(r.get('sender_name') or '')}\n{e(body)[:500]}\n<code>{dt(r.get('created_at'))}</code>")
+            deleted_list = "\n\n".join(item_lines)
+
+        tpl = await self.db.get_template(f"deleted_{lang}")
+        if tpl:
+            values = {"deleted_messages_list": deleted_list, "deleted_count": str(len(rows))}
+            rendered, ents = render_dynamic_template(str(tpl.get("text") or ""), tpl.get("entities") or [], values)
+            media = tpl.get("media")
+            if media:
+                if edit:
+                    chat_id, message_id = edit
+                    try:
+                        await self.bot.delete_message(chat_id, message_id)
+                    except Exception:
+                        pass
+                await self.send_template_content(tg_id, rendered, ents, media, back_menu(lang))
+            else:
+                await self._send_or_edit(tg_id, rendered, back_menu(lang), edit, entities=ents)
             return
-        lines = ["👻 <b>Last deleted</b>" if lang == "en" else "👻 <b>Останні видалені</b>" if lang == "uk" else "👻 <b>Последние удалённые</b>"]
-        for r in rows:
-            body = r.get("text") or r.get("caption") or f"[{r.get('content_type') or 'unknown'}]"
-            lines.append(f"<b>{e(r.get('chat_title') or '')}</b> — {e(r.get('sender_name') or '')}\n{e(body)[:500]}\n<code>{dt(r.get('created_at'))}</code>")
-        await self._send_or_edit(tg_id, "\n\n".join(lines), back_menu(lang), edit)
+
+        if not rows:
+            await self._send_or_edit(tg_id, deleted_list, back_menu(lang), edit)
+            return
+        title = "👻 <b>Last deleted</b>" if lang == "en" else "👻 <b>Останні видалені</b>" if lang == "uk" else "👻 <b>Последние удалённые</b>"
+        await self._send_or_edit(tg_id, f"{title}\n\n{deleted_list}", back_menu(lang), edit)
+
 
     async def _send_or_edit(
         self,
