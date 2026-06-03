@@ -79,6 +79,34 @@ def plan_duration_label(days: int | str | None, lang: str) -> str:
     return f"{d} днів" if lang == "uk" else f"{d} дней" if lang == "ru" else f"{d} days"
 
 
+def plan_price_uah(plan: dict[str, Any] | None, uah_rate: Any = None) -> Decimal | None:
+    if not plan:
+        return None
+    manual = plan.get("price_uah")
+    try:
+        if manual is not None and str(manual).strip() not in {"", "0", "0.00", "None", "null"}:
+            return Decimal(str(manual)).quantize(Decimal("1"))
+    except Exception:
+        pass
+    try:
+        rate = Decimal(str(uah_rate if uah_rate is not None else 0).replace(",", "."))
+        if rate > 0:
+            return (Decimal(str(plan.get("price_usd") or 0)) * rate).quantize(Decimal("1"))
+    except Exception:
+        return None
+    return None
+
+
+def amount_uah_line(amount: Decimal | None, lang: str) -> str:
+    if amount is None:
+        return ""
+    if lang == "en":
+        return f"🇺🇦 <b>Amount in UAH:</b> {amount} UAH"
+    if lang == "ru":
+        return f"🇺🇦 <b>Сумма в грн:</b> {amount} грн"
+    return f"🇺🇦 <b>Сума в грн:</b> {amount} грн"
+
+
 def method_title(method: dict[str, Any], lang: str) -> str:
     return str(method.get(f"title_{lang}") or method.get("title_en") or method.get("code"))
 
@@ -163,6 +191,19 @@ TEMPLATE_ALIASES = {
     "referral": "referrals",
     "реферали": "referrals",
     "рефералы": "referrals",
+    "menu": "menu",
+    "меню": "menu",
+    "language": "choose_lang",
+    "lang": "choose_lang",
+    "мова": "choose_lang",
+    "язык": "choose_lang",
+    "choose_payment": "choose_payment",
+    "payment": "choose_payment",
+    "оплата": "choose_payment",
+    "manual_payment": "payment_manual",
+    "manual": "payment_manual",
+    "ручна": "payment_manual",
+    "ручная": "payment_manual",
 }
 
 DYNAMIC_TEMPLATE_SPECS = {
@@ -204,6 +245,22 @@ DYNAMIC_TEMPLATE_SPECS = {
             "uk": "🤝 Реферальна система\n\nЗапрошуй друзів у Ghostly Guard і отримуй {referral_percent}% з кожної їхньої покупки.\n\n🔗 Твоє посилання:\n{referral_link}\n\n👥 Запрошено: {invited_count}\n🛒 Покупок: {purchases_count}\n💰 Зароблено: ${earned_total}\n💵 Доступно: ${available_total}\n✅ Виплачено: ${paid_total}",
             "ru": "🤝 Реферальная система\n\nПриглашай друзей в Ghostly Guard и получай {referral_percent}% с каждой их покупки.\n\n🔗 Твоя ссылка:\n{referral_link}\n\n👥 Приглашено: {invited_count}\n🛒 Покупок: {purchases_count}\n💰 Заработано: ${earned_total}\n💵 Доступно: ${available_total}\n✅ Выплачено: ${paid_total}",
             "en": "🤝 Referral system\n\nInvite friends to Ghostly Guard and earn {referral_percent}% from every purchase they make.\n\n🔗 Your link:\n{referral_link}\n\n👥 Invited: {invited_count}\n🛒 Purchases: {purchases_count}\n💰 Earned: ${earned_total}\n💵 Available: ${available_total}\n✅ Paid: ${paid_total}",
+        },
+    },
+    "choose_payment": {
+        "vars": ["plan_name", "amount_usd", "amount_uah_line"],
+        "default": {
+            "uk": "💳 Оплата тарифу\n\nТариф: {plan_name}\nСума: ${amount_usd}\n{amount_uah_line}\n\nОбери спосіб оплати:",
+            "ru": "💳 Оплата тарифа\n\nТариф: {plan_name}\nСумма: ${amount_usd}\n{amount_uah_line}\n\nВыбери способ оплаты:",
+            "en": "💳 Plan payment\n\nPlan: {plan_name}\nAmount: ${amount_usd}\n{amount_uah_line}\n\nChoose payment method:",
+        },
+    },
+    "payment_manual": {
+        "vars": ["plan_name", "amount_usd", "amount_uah_line", "instructions"],
+        "default": {
+            "uk": "💳 Ручна оплата\n\n💎 Тариф: {plan_name}\n💰 Сума: ${amount_usd}\n{amount_uah_line}\n\n{instructions}\n\nПісля оплати натисни «Я оплатив» і надішли скрін/квитанцію.",
+            "ru": "💳 Ручная оплата\n\n💎 Тариф: {plan_name}\n💰 Сумма: ${amount_usd}\n{amount_uah_line}\n\n{instructions}\n\nПосле оплаты нажми «Я оплатил» и отправь скрин/квитанцию.",
+            "en": "💳 Manual payment\n\n💎 Plan: {plan_name}\n💰 Amount: ${amount_usd}\n{amount_uah_line}\n\n{instructions}\n\nAfter payment, press “I paid” and send a receipt/screenshot.",
         },
     },
 }
@@ -405,6 +462,10 @@ def detect_template_from_target(target: dict[str, Any] | None, lang: str) -> str
         return f"business_connected_{lang}"
     if any(x in low for x in ["як підключити", "как подключить", "how to connect", "chatbots", "чат-бот", "після підключення", "после подключения"]):
         return f"connect_{lang}"
+    if any(x in low for x in ["головне меню", "главное меню", "main menu", "обери, що потрібно", "выбери, что нужно", "choose what you need"]):
+        return f"menu_{lang}"
+    if any(x in low for x in ["обери мову", "выбери язык", "choose language", "choose a language"]):
+        return f"choose_lang_{lang}"
 
     # Dynamic screens. Detect them only by clear screen markers, not by generic
     # words like "Business", otherwise privacy/connect screens get misdetected.
@@ -418,6 +479,10 @@ def detect_template_from_target(target: dict[str, Any] | None, lang: str) -> str
         return f"deleted_{lang}"
     if any(x in low for x in ["реферальна система", "реферальная система", "referral system", "referral_link", "твоя ссылка", "твоє посилання", "your link", "запрошуй друзів", "приглашай друзей"]):
         return f"referrals_{lang}"
+    if any(x in low for x in ["оплата тарифу", "оплата тарифа", "plan payment", "обери спосіб оплати", "выбери способ оплаты", "choose payment method"]):
+        return f"choose_payment_{lang}"
+    if any(x in low for x in ["ручна оплата", "ручная оплата", "manual payment", "я оплатив", "i paid", "квитанцію", "квитанцию"]):
+        return f"payment_manual_{lang}"
     if any(x in low for x in ["ghostly", "що я вмію", "что я умею", "what i can", "особистий захист", "личный защит", "telegram-чат"]):
         return f"start_{lang}"
     return None
@@ -566,7 +631,7 @@ class BotHandlers:
                     pass
             await self.show_start(tg_id, lang, is_admin)
         elif text in {"/language", "/lang"}:
-            await self.bot.send_message(tg_id, tr(lang, "choose_lang"), lang_keyboard())
+            await self.show_language_screen(tg_id, lang)
         elif text in {"/status"}:
             await self.show_status(tg_id, lang)
         elif text in {"/plans"}:
@@ -597,7 +662,7 @@ class BotHandlers:
         elif text.startswith("/"):
             await self.bot.send_message(tg_id, tr(lang, "unknown_command"), main_menu(lang, is_admin))
         else:
-            await self.bot.send_message(tg_id, tr(lang, "menu"), main_menu(lang, is_admin))
+            await self.show_menu_screen(tg_id, lang, is_admin)
 
     async def handle_edit_command(self, tg_id: int, lang: str, msg: dict[str, Any]) -> None:
         if not await self.db.is_admin(tg_id):
@@ -640,18 +705,19 @@ class BotHandlers:
             await self.db.set_state(tg_id, "admin_edit_message", payload)
             if template_key:
                 extra = f"\n\n🧩 <b>Я визначив цей екран як шаблон:</b> <code>{e(template_key)}</code>. Новий контент збережу назавжди."
+                current_tpl = await self.db.get_template(template_key)
+                editable = str((current_tpl or {}).get("text") or target.get("text") or target.get("caption") or "")
                 if is_dynamic_template_key(template_key):
                     base = template_base(template_key)
-                    current_tpl = await self.db.get_template(template_key)
                     editable = str((current_tpl or {}).get("text") or dynamic_template_default(base, lang))
                     protected = " ".join(["{" + v + "}" for v in dynamic_required_vars(base)])
                     extra += (
                         "\n\n🔒 <b>Це динамічний екран.</b> Я підставляю живі дані користувача через змінні."
                         "\nНе видаляй ці змінні, інакше я не збережу шаблон:"
                         f"\n<code>{e(protected)}</code>"
-                        "\n\n📋 <b>Поточний шаблон для копіювання:</b>"
-                        f"\n<pre>{e(editable)}</pre>"
                     )
+                if editable:
+                    extra += "\n\n📋 <b>Поточний текст для копіювання:</b>" f"\n<pre>{e(editable)}</pre>"
             else:
                 extra = "\n\nℹ️ Це буде разове редагування конкретного повідомлення."
             await self.bot.send_message(
@@ -855,7 +921,7 @@ class BotHandlers:
                 return
 
             await self.db.clear_state(tg_id)
-            await self.bot.send_message(tg_id, tr(lang, "menu"), main_menu(lang, is_admin))
+            await self.show_menu_screen(tg_id, lang, is_admin)
         except Exception as exc:
             await self.bot.send_message(tg_id, f"❌ Помилка:\n<code>{e(repr(exc))}</code>", cancel_keyboard(lang, "admin" if is_admin else "menu"))
 
@@ -866,8 +932,23 @@ class BotHandlers:
             return
         await self.bot.send_message(tg_id, tr(lang, "start", app=e(self.settings.app_name)), main_menu(lang, is_admin))
 
+    async def show_menu_screen(self, tg_id: int, lang: str, is_admin: bool, edit: tuple[int, int] | None = None) -> None:
+        tpl = await self.db.get_template(f"menu_{lang}")
+        if tpl:
+            await self.send_template_screen(tg_id, tpl, main_menu(lang, is_admin), edit)
+            return
+        await self._send_or_edit(tg_id, tr(lang, "menu"), main_menu(lang, is_admin), edit)
+
+    async def show_language_screen(self, tg_id: int, lang: str, edit: tuple[int, int] | None = None) -> None:
+        tpl = await self.db.get_template(f"choose_lang_{lang}")
+        if tpl:
+            await self.send_template_screen(tg_id, tpl, lang_keyboard(), edit)
+            return
+        await self.show_language_screen(tg_id, lang, edit)
+
     async def show_connect(self, tg_id: int, lang: str, edit: tuple[int, int] | None = None) -> None:
         video_url = await self.db.get_setting("connect_video_url", "")
+        uah_rate = await self.db.get_setting("uah_rate", 42)
         video_file_id = await self.db.get_setting("connect_video_file_id", "")
         video_kind = await self.db.get_setting("connect_video_kind", "video")
         tpl = await self.db.get_template(f"connect_{lang}")
@@ -1228,11 +1309,11 @@ class BotHandlers:
             elif target.startswith("admin_method:"):
                 await self.show_admin_method(tg_id, lang, target.split(":", 1)[1], edit)
             else:
-                await self._send_or_edit(tg_id, tr(lang, "menu"), main_menu(lang, await self.db.is_admin(tg_id)), edit)
+                await self.show_menu_screen(tg_id, lang, await self.db.is_admin(tg_id), edit)
             return
 
         if data == "menu":
-            await self._send_or_edit(tg_id, tr(lang, "menu"), main_menu(lang, await self.db.is_admin(tg_id)), edit)
+            await self.show_menu_screen(tg_id, lang, await self.db.is_admin(tg_id), edit)
         elif data == "status":
             await self.show_status(tg_id, lang, edit)
         elif data == "plans":
@@ -1246,7 +1327,7 @@ class BotHandlers:
             else:
                 await self._send_or_edit(tg_id, tr(lang, "privacy"), back_menu(lang), edit)
         elif data == "lang":
-            await self._send_or_edit(tg_id, tr(lang, "choose_lang"), lang_keyboard(), edit)
+            await self.show_language_screen(tg_id, lang, edit)
         elif data == "last_deleted":
             await self.show_last_deleted(tg_id, lang, edit)
         elif data == "referrals":
@@ -1267,7 +1348,7 @@ class BotHandlers:
         elif data.startswith("setlang:"):
             new_lang = data.split(":", 1)[1]
             await self.db.set_lang(tg_id, new_lang)
-            await self._send_or_edit(tg_id, tr(new_lang, "menu"), main_menu(new_lang, await self.db.is_admin(tg_id)), edit)
+            await self.show_menu_screen(tg_id, new_lang, await self.db.is_admin(tg_id), edit)
         elif data.startswith("buy:"):
             await self.callback_buy(tg_id, lang, int(data.split(":", 1)[1]), edit)
         elif data.startswith("pay:"):
@@ -1292,7 +1373,31 @@ class BotHandlers:
             await self.show_plans(tg_id, lang, edit)
             return
         methods = await self.db.payment_methods(active_only=True)
-        text = tr(lang, "choose_payment", plan=e(plan_name(plan, lang)), price=e(plan["price_usd"]))
+        uah_rate = await self.db.get_setting("uah_rate", 42)
+        amount_uah = plan_price_uah(plan, uah_rate)
+        values = {
+            "plan_name": plan_name(plan, lang),
+            "amount_usd": str(plan["price_usd"]),
+            "amount_uah_line": amount_uah_line(amount_uah, lang),
+        }
+        tpl = await self.db.get_template(f"choose_payment_{lang}")
+        if tpl:
+            rendered, ents = render_dynamic_template(str(tpl.get("text") or ""), tpl.get("entities") or [], values)
+            media = tpl.get("media")
+            if media:
+                if edit:
+                    chat_id, message_id = edit
+                    try:
+                        await self.bot.delete_message(chat_id, message_id)
+                    except Exception:
+                        pass
+                await self.send_template_content(tg_id, rendered, ents, media, payment_methods_keyboard(lang, plan_id, methods))
+            else:
+                await self._send_or_edit(tg_id, rendered, payment_methods_keyboard(lang, plan_id, methods), edit, entities=ents)
+            return
+        text = tr(lang, "choose_payment", plan=e(values["plan_name"]), price=e(values["amount_usd"]))
+        if amount_uah is not None:
+            text += "\n" + amount_uah_line(amount_uah, lang)
         await self._send_or_edit(tg_id, text, payment_methods_keyboard(lang, plan_id, methods), edit)
 
     async def callback_pay(self, tg_id: int, lang: str, plan_id: int, method_code: str, edit: tuple[int, int] | None) -> None:
@@ -1302,6 +1407,8 @@ class BotHandlers:
             await self.show_plans(tg_id, lang, edit)
             return
         amount = Decimal(str(plan["price_usd"]))
+        uah_rate = await self.db.get_setting("uah_rate", 42)
+        amount_uah = plan_price_uah(plan, uah_rate)
         if method_code == "cryptobot":
             try:
                 invoice = await self.crypto.create_invoice(amount, f"{self.settings.app_name}: {plan_name(plan, 'en')}", f"user:{tg_id}:plan:{plan_id}")
@@ -1315,8 +1422,37 @@ class BotHandlers:
                 await self.bot.send_message(tg_id, tr(lang, "payment_error"), back_menu(lang))
             return
 
-        payment = await self.db.create_payment(tg_id, plan_id, method_code, amount, raw={"method": method_code})
-        text = tr(lang, "payment_manual", plan=e(plan_name(plan, lang)), amount=e(amount), instructions=method_instructions(method, lang))
+        raw_payment = {"method": method_code}
+        if method_code == "ua_card" and amount_uah is not None:
+            raw_payment["amount_uah"] = str(amount_uah)
+            raw_payment["uah_rate"] = str(uah_rate)
+        payment = await self.db.create_payment(tg_id, plan_id, method_code, amount, raw=raw_payment)
+        values = {
+            "plan_name": plan_name(plan, lang),
+            "amount_usd": str(amount),
+            "amount_uah_line": amount_uah_line(amount_uah, lang) if method_code == "ua_card" else "",
+            "instructions": method_instructions(method, lang),
+        }
+        tpl = await self.db.get_template(f"payment_manual_{lang}")
+        if tpl:
+            rendered, ents = render_dynamic_template(str(tpl.get("text") or ""), tpl.get("entities") or [], values)
+            media = tpl.get("media")
+            if media:
+                if edit:
+                    chat_id, message_id = edit
+                    try:
+                        await self.bot.delete_message(chat_id, message_id)
+                    except Exception:
+                        pass
+                await self.send_template_content(tg_id, rendered, ents, media, manual_payment_keyboard(lang, int(payment["id"])))
+            else:
+                await self._send_or_edit(tg_id, rendered, manual_payment_keyboard(lang, int(payment["id"])), edit, entities=ents)
+            return
+        text = tr(lang, "payment_manual", plan=e(values["plan_name"]), amount=e(amount), instructions=method_instructions(method, lang))
+        if method_code == "ua_card" and amount_uah is not None:
+            text = text.replace(f"💰 <b>Сума:</b> ${e(amount)}", f"💰 <b>Сума:</b> ${e(amount)}\n{amount_uah_line(amount_uah, lang)}")
+            text = text.replace(f"💰 <b>Сумма:</b> ${e(amount)}", f"💰 <b>Сумма:</b> ${e(amount)}\n{amount_uah_line(amount_uah, lang)}")
+            text = text.replace(f"💰 <b>Amount:</b> ${e(amount)}", f"💰 <b>Amount:</b> ${e(amount)}\n{amount_uah_line(amount_uah, lang)}")
         await self._send_or_edit(tg_id, text, manual_payment_keyboard(lang, int(payment["id"])), edit)
 
     async def callback_check_crypto(self, tg_id: int, lang: str, payment_id: int, edit: tuple[int, int] | None) -> None:
@@ -1612,6 +1748,7 @@ class BotHandlers:
         free_hours = await self.db.get_setting("free_retention_hours", self.settings.free_retention_hours)
         paid_days = await self.db.get_setting("message_retention_days", self.settings.message_retention_days)
         video_url = await self.db.get_setting("connect_video_url", "")
+        uah_rate = await self.db.get_setting("uah_rate", 42)
         video_file_id = await self.db.get_setting("connect_video_file_id", "")
         text = (
             "⚙️ <b>Налаштування</b>\n\n"

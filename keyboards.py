@@ -126,7 +126,8 @@ def admin_plans_keyboard(lang: str, plans: list[dict[str, Any]]) -> dict[str, An
 
 def admin_plan_keyboard(lang: str, plan_id: int, is_active: bool) -> dict[str, Any]:
     return inline([
-        [("💵 Ціна / Price", f"adm_set_plan:{plan_id}:price_usd"), ("📆 Дні / Days", f"adm_set_plan:{plan_id}:duration_days")],
+        [("💵 USD Price", f"adm_set_plan:{plan_id}:price_usd"), ("₴ UAH Price", f"adm_set_plan:{plan_id}:price_uah")],
+        [("📆 Дні / Days", f"adm_set_plan:{plan_id}:duration_days")],
         [("↕️ Позиція", f"adm_set_plan:{plan_id}:position")],
         [("🇺🇦 Назва", f"adm_set_plan:{plan_id}:name_uk"), ("🏳️ Название", f"adm_set_plan:{plan_id}:name_ru"), ("🇬🇧 Name", f"adm_set_plan:{plan_id}:name_en")],
         [("🇺🇦 Фічі", f"adm_set_plan:{plan_id}:features_uk"), ("🏳️ Фичи", f"adm_set_plan:{plan_id}:features_ru"), ("🇬🇧 Features", f"adm_set_plan:{plan_id}:features_en")],
@@ -173,7 +174,7 @@ def admin_single_payment_keyboard(lang: str, payment_id: int) -> dict[str, Any]:
 def admin_settings_keyboard(lang: str) -> dict[str, Any]:
     return inline([
         [("🎁 Free delete limit", "adm_set_setting:free_deleted_limit_per_day")],
-        [("🤝 Referral percent", "adm_set_setting:referral_percent")],
+        [("🤝 Referral percent", "adm_set_setting:referral_percent"), ("₴ UAH/USD rate", "adm_set_setting:uah_rate")],
         [("🧹 Free retention hours", "adm_set_setting:free_retention_hours")],
         [("🗄 Paid retention days", "adm_set_setting:message_retention_days")],
         [("🎬 Завантажити відео-інструкцію", "adm_upload_connect_video")],

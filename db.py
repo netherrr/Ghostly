@@ -74,6 +74,7 @@ class Database:
             features_ru TEXT NOT NULL DEFAULT '',
             features_en TEXT NOT NULL DEFAULT '',
             price_usd NUMERIC(12,2) NOT NULL,
+            price_uah NUMERIC(12,0),
             duration_days INT NOT NULL,
             is_active BOOLEAN NOT NULL DEFAULT TRUE,
             position INT NOT NULL DEFAULT 100,
@@ -181,6 +182,7 @@ class Database:
             created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
         );
 
+        ALTER TABLE plans ADD COLUMN IF NOT EXISTS price_uah NUMERIC(12,0);
         ALTER TABLE users ADD COLUMN IF NOT EXISTS referrer_id BIGINT REFERENCES users(tg_id) ON DELETE SET NULL;
         ALTER TABLE users ADD COLUMN IF NOT EXISTS referral_created_at TIMESTAMPTZ;
 
@@ -237,33 +239,33 @@ class Database:
 
             await con.execute(
                 """
-                INSERT INTO plans(code, name_uk, name_ru, name_en, features_uk, features_ru, features_en, price_usd, duration_days, position, is_active)
+                INSERT INTO plans(code, name_uk, name_ru, name_en, features_uk, features_ru, features_en, price_usd, price_uah, duration_days, position, is_active)
                 VALUES
                 ('pro_30', 'Pro на 1 місяць', 'Pro на 1 месяц', 'Pro 1 month',
                  '👻 Усі видалені повідомлення\n✏️ Історія редагувань\n🔎 Ключові слова\n🛡 Антискам-сповіщення\n🗄 Зберігання 30 днів',
                  '👻 Все удалённые сообщения\n✏️ История правок\n🔎 Ключевые слова\n🛡 Антискам-уведомления\n🗄 Хранение 30 дней',
                  '👻 All deleted messages\n✏️ Edit history\n🔎 Keywords\n🛡 Anti-scam alerts\n🗄 30-day storage',
-                 3.99, 30, 10, TRUE),
+                 3.99, NULL, 30, 10, TRUE),
                 ('pro_90', 'Pro на 3 місяці', 'Pro на 3 месяца', 'Pro 3 months',
                  '👻 Усі видалені повідомлення\n✏️ Історія редагувань\n🔎 Ключові слова\n🛡 Антискам-сповіщення\n🔥 Вигідніше на 3 місяці',
                  '👻 Все удалённые сообщения\n✏️ История правок\n🔎 Ключевые слова\n🛡 Антискам-уведомления\n🔥 Выгоднее на 3 месяца',
                  '👻 All deleted messages\n✏️ Edit history\n🔎 Keywords\n🛡 Anti-scam alerts\n🔥 Better value for 3 months',
-                 9.99, 90, 20, TRUE),
+                 9.99, NULL, 90, 20, TRUE),
                 ('pro_180', 'Pro на 6 місяців', 'Pro на 6 месяцев', 'Pro 6 months',
                  '👻 Усі видалені повідомлення\n✏️ Історія редагувань\n🔎 Ключові слова\n🛡 Антискам-сповіщення\n💎 Найкраще для постійного користування',
                  '👻 Все удалённые сообщения\n✏️ История правок\n🔎 Ключевые слова\n🛡 Антискам-уведомления\n💎 Лучший вариант для постоянного использования',
                  '👻 All deleted messages\n✏️ Edit history\n🔎 Keywords\n🛡 Anti-scam alerts\n💎 Best for regular use',
-                 17.99, 180, 30, TRUE),
+                 17.99, NULL, 180, 30, TRUE),
                 ('pro_365', 'Pro на 1 рік', 'Pro на 1 год', 'Pro 1 year',
                  '👻 Усі видалені повідомлення\n✏️ Історія редагувань\n🔎 Ключові слова\n🛡 Антискам-сповіщення\n🏆 Максимальна вигода на рік',
                  '👻 Все удалённые сообщения\n✏️ История правок\n🔎 Ключевые слова\n🛡 Антискам-уведомления\n🏆 Максимальная выгода на год',
                  '👻 All deleted messages\n✏️ Edit history\n🔎 Keywords\n🛡 Anti-scam alerts\n🏆 Best yearly value',
-                 29.99, 365, 40, TRUE),
+                 29.99, NULL, 365, 40, TRUE),
                 ('pro_lifetime', 'Pro назавжди', 'Pro навсегда', 'Pro lifetime',
                  '👻 Усі видалені повідомлення\n✏️ Історія редагувань\n🔎 Ключові слова\n🛡 Антискам-сповіщення\n♾ Безлімітний доступ',
                  '👻 Все удалённые сообщения\n✏️ История правок\n🔎 Ключевые слова\n🛡 Антискам-уведомления\n♾ Безлимитный доступ',
                  '👻 All deleted messages\n✏️ Edit history\n🔎 Keywords\n🛡 Anti-scam alerts\n♾ Lifetime access',
-                 79.99, 36500, 50, TRUE)
+                 79.99, NULL, 36500, 50, TRUE)
                 ON CONFLICT(code) DO UPDATE SET
                     name_uk=EXCLUDED.name_uk,
                     name_ru=EXCLUDED.name_ru,
@@ -311,6 +313,7 @@ class Database:
                 "connect_video_file_id": "",
                 "connect_video_kind": "video",
                 "referral_percent": 30,
+                "uah_rate": 42,
             }
             for key, value in defaults.items():
                 await con.execute(
@@ -414,8 +417,8 @@ class Database:
             pos = await con.fetchval("SELECT COALESCE(MAX(position), 0) + 10 FROM plans")
             row = await con.fetchrow(
                 """
-                INSERT INTO plans(code, name_uk, name_ru, name_en, features_uk, features_ru, features_en, price_usd, duration_days, position, is_active)
-                VALUES($1, $2, $2, $2, '', '', '', $3, $4, $5, TRUE)
+                INSERT INTO plans(code, name_uk, name_ru, name_en, features_uk, features_ru, features_en, price_usd, price_uah, duration_days, position, is_active)
+                VALUES($1, $2, $2, $2, '', '', '', $3, NULL, $4, $5, TRUE)
                 RETURNING *
                 """,
                 clean_code, title, Decimal(str(price_usd)), int(duration_days), int(pos or 100),
@@ -423,12 +426,15 @@ class Database:
             return dict(row)
 
     async def update_plan_field(self, plan_id: int, field: str, value: str) -> None:
-        allowed = {"name_uk", "name_ru", "name_en", "features_uk", "features_ru", "features_en", "price_usd", "duration_days", "is_active", "position"}
+        allowed = {"name_uk", "name_ru", "name_en", "features_uk", "features_ru", "features_en", "price_usd", "price_uah", "duration_days", "is_active", "position"}
         if field not in allowed:
             raise ValueError(f"Unsupported plan field: {field}")
         parsed: Any = value
         if field in {"price_usd"}:
             parsed = Decimal(value.replace(",", "."))
+        elif field == "price_uah":
+            value_clean = value.strip().lower()
+            parsed = None if value_clean in {"", "0", "null", "none", "auto", "авто"} else Decimal(value.replace(",", "."))
         elif field in {"duration_days", "position"}:
             parsed = int(value)
         elif field == "is_active":
