@@ -34,6 +34,7 @@ class Settings:
     free_deleted_limit_per_day: int
     public_terms_url: str | None
     support_username: str | None
+    bot_username: str | None
 
     @property
     def webhook_path(self) -> str:
@@ -71,4 +72,5 @@ def load_settings() -> Settings:
         free_deleted_limit_per_day=int(os.getenv("FREE_DELETED_LIMIT_PER_DAY", "10")),
         public_terms_url=os.getenv("PUBLIC_TERMS_URL", "").strip() or None,
         support_username=os.getenv("SUPPORT_USERNAME", "").strip() or None,
+        bot_username=os.getenv("BOT_USERNAME", "").strip().lstrip("@") or None,
     )

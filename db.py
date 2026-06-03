@@ -181,6 +181,28 @@ class Database:
             created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
         );
 
+        ALTER TABLE users ADD COLUMN IF NOT EXISTS referrer_id BIGINT REFERENCES users(tg_id) ON DELETE SET NULL;
+        ALTER TABLE users ADD COLUMN IF NOT EXISTS referral_created_at TIMESTAMPTZ;
+
+        CREATE TABLE IF NOT EXISTS referral_rewards (
+            id BIGSERIAL PRIMARY KEY,
+            referrer_id BIGINT REFERENCES users(tg_id) ON DELETE SET NULL,
+            buyer_id BIGINT REFERENCES users(tg_id) ON DELETE SET NULL,
+            payment_id BIGINT UNIQUE REFERENCES payments(id) ON DELETE CASCADE,
+            percent NUMERIC(5,2) NOT NULL DEFAULT 30.00,
+            purchase_amount_usd NUMERIC(12,2) NOT NULL,
+            reward_amount_usd NUMERIC(12,2) NOT NULL,
+            status TEXT NOT NULL DEFAULT 'available',
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            paid_at TIMESTAMPTZ,
+            admin_checked_by BIGINT,
+            raw JSONB NOT NULL DEFAULT '{}'::jsonb
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_referral_referrer ON referral_rewards(referrer_id, created_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_referral_buyer ON referral_rewards(buyer_id, created_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_users_referrer ON users(referrer_id);
+
         CREATE INDEX IF NOT EXISTS idx_cached_owner ON cached_messages(owner_tg_id, created_at DESC);
         CREATE INDEX IF NOT EXISTS idx_cached_lookup ON cached_messages(business_connection_id, chat_id, message_id);
         CREATE INDEX IF NOT EXISTS idx_deleted_owner ON deleted_events(owner_tg_id, created_at DESC);
@@ -288,6 +310,7 @@ class Database:
                 "connect_video_url": "",
                 "connect_video_file_id": "",
                 "connect_video_kind": "video",
+                "referral_percent": 30,
             }
             for key, value in defaults.items():
                 await con.execute(
@@ -516,6 +539,30 @@ class Database:
                 start = current if current and current > now else now
                 until = start + timedelta(days=days)
                 await con.execute("UPDATE users SET subscription_until=$2, updated_at=NOW() WHERE tg_id=$1", user_id, until)
+
+                referrer_id = await con.fetchval("SELECT referrer_id FROM users WHERE tg_id=$1", user_id)
+                if referrer_id and int(referrer_id) != int(user_id):
+                    percent_raw = await con.fetchval("SELECT value FROM settings WHERE key='referral_percent'")
+                    try:
+                        percent = Decimal(str(decode_json(percent_raw, 30)))
+                    except Exception:
+                        percent = Decimal("30")
+                    reward = (Decimal(str(payment["amount_usd"])) * percent / Decimal("100")).quantize(Decimal("0.01"))
+                    await con.execute(
+                        """
+                        INSERT INTO referral_rewards(referrer_id, buyer_id, payment_id, percent, purchase_amount_usd, reward_amount_usd, raw)
+                        VALUES($1, $2, $3, $4, $5, $6, $7::jsonb)
+                        ON CONFLICT(payment_id) DO NOTHING
+                        """,
+                        int(referrer_id),
+                        user_id,
+                        int(payment_id),
+                        percent,
+                        Decimal(str(payment["amount_usd"])),
+                        reward,
+                        json.dumps({"source": "payment_paid"}),
+                    )
+
                 payment["status"] = "paid"
                 payment["paid_until"] = until
                 return payment
@@ -755,6 +802,103 @@ class Database:
                 await con.execute("DELETE FROM business_connections WHERE owner_tg_id=$1", tg_id)
                 await con.execute("DELETE FROM payments WHERE user_id=$1", tg_id)
                 await con.execute("UPDATE users SET subscription_until=NULL, free_deleted_today=0 WHERE tg_id=$1", tg_id)
+
+
+    async def set_referrer(self, user_id: int, referrer_id: int) -> bool:
+        if not user_id or not referrer_id or int(user_id) == int(referrer_id):
+            return False
+        async with self._pool().acquire() as con:
+            ref_exists = await con.fetchval("SELECT 1 FROM users WHERE tg_id=$1", int(referrer_id))
+            if not ref_exists:
+                return False
+            row = await con.fetchrow(
+                """
+                UPDATE users
+                SET referrer_id=$2, referral_created_at=COALESCE(referral_created_at, NOW()), updated_at=NOW()
+                WHERE tg_id=$1 AND referrer_id IS NULL
+                RETURNING referrer_id
+                """,
+                int(user_id),
+                int(referrer_id),
+            )
+            return bool(row)
+
+    async def referral_stats(self, user_id: int) -> dict[str, Any]:
+        async with self._pool().acquire() as con:
+            row = await con.fetchrow(
+                """
+                SELECT
+                  (SELECT COUNT(*) FROM users WHERE referrer_id=$1) AS invited,
+                  (SELECT COUNT(*) FROM referral_rewards WHERE referrer_id=$1) AS purchases,
+                  (SELECT COALESCE(SUM(reward_amount_usd),0) FROM referral_rewards WHERE referrer_id=$1) AS earned,
+                  (SELECT COALESCE(SUM(reward_amount_usd),0) FROM referral_rewards WHERE referrer_id=$1 AND status='available') AS available,
+                  (SELECT COALESCE(SUM(reward_amount_usd),0) FROM referral_rewards WHERE referrer_id=$1 AND status='paid') AS paid
+                """,
+                int(user_id),
+            )
+            return dict(row) if row else {"invited": 0, "purchases": 0, "earned": 0, "available": 0, "paid": 0}
+
+    async def admin_referral_stats(self) -> dict[str, Any]:
+        async with self._pool().acquire() as con:
+            totals = await con.fetchrow(
+                """
+                SELECT
+                  (SELECT COUNT(*) FROM users WHERE referrer_id IS NOT NULL) AS referred_users,
+                  (SELECT COUNT(*) FROM referral_rewards) AS reward_count,
+                  (SELECT COALESCE(SUM(purchase_amount_usd),0) FROM referral_rewards) AS referred_sales,
+                  (SELECT COALESCE(SUM(reward_amount_usd),0) FROM referral_rewards) AS rewards_total,
+                  (SELECT COALESCE(SUM(reward_amount_usd),0) FROM referral_rewards WHERE status='available') AS rewards_available,
+                  (SELECT COALESCE(SUM(reward_amount_usd),0) FROM referral_rewards WHERE status='paid') AS rewards_paid
+                """
+            )
+            top = await con.fetch(
+                """
+                SELECT u.tg_id, u.username, u.first_name, u.last_name,
+                       COUNT(r.id) AS reward_count,
+                       COALESCE(SUM(r.reward_amount_usd),0) AS earned,
+                       COALESCE(SUM(CASE WHEN r.status='available' THEN r.reward_amount_usd ELSE 0 END),0) AS available,
+                       (SELECT COUNT(*) FROM users invited WHERE invited.referrer_id=u.tg_id) AS invited
+                FROM users u
+                LEFT JOIN referral_rewards r ON r.referrer_id=u.tg_id
+                WHERE u.tg_id IN (SELECT referrer_id FROM users WHERE referrer_id IS NOT NULL)
+                   OR u.tg_id IN (SELECT referrer_id FROM referral_rewards WHERE referrer_id IS NOT NULL)
+                GROUP BY u.tg_id
+                ORDER BY earned DESC, invited DESC
+                LIMIT 10
+                """
+            )
+            result = dict(totals) if totals else {}
+            result["top"] = [dict(r) for r in top]
+            return result
+
+    async def create_referral_reward_for_payment(self, payment: dict[str, Any]) -> dict[str, Any] | None:
+        user_id = payment.get("user_id")
+        payment_id = payment.get("id")
+        amount = payment.get("amount_usd")
+        if not user_id or not payment_id or amount is None:
+            return None
+        async with self._pool().acquire() as con:
+            referrer_id = await con.fetchval("SELECT referrer_id FROM users WHERE tg_id=$1", int(user_id))
+            if not referrer_id or int(referrer_id) == int(user_id):
+                return None
+            percent = Decimal(str(await self.get_setting("referral_percent", 30)))
+            reward = Decimal(str(amount)) * percent / Decimal("100")
+            row = await con.fetchrow(
+                """
+                INSERT INTO referral_rewards(referrer_id, buyer_id, payment_id, percent, purchase_amount_usd, reward_amount_usd, raw)
+                VALUES($1, $2, $3, $4, $5, $6, $7::jsonb)
+                ON CONFLICT(payment_id) DO NOTHING
+                RETURNING *
+                """,
+                int(referrer_id),
+                int(user_id),
+                int(payment_id),
+                percent,
+                Decimal(str(amount)),
+                reward.quantize(Decimal("0.01")),
+                json.dumps({"source": "payment_paid"}),
+            )
+            return dict(row) if row else None
 
     async def stats(self) -> dict[str, Any]:
         async with self._pool().acquire() as con:

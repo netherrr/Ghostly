@@ -14,7 +14,7 @@ def main_menu(lang: str, is_admin: bool = False) -> dict[str, Any]:
         [(btn(lang, "status"), "status"), (btn(lang, "plans"), "plans")],
         [(btn(lang, "connect"), "connect"), (btn(lang, "last_deleted"), "last_deleted")],
         [(btn(lang, "keywords"), "keywords"), (btn(lang, "privacy"), "privacy")],
-        [(btn(lang, "lang"), "lang")],
+        [(btn(lang, "referrals"), "referrals"), (btn(lang, "lang"), "lang")],
     ]
     if is_admin:
         rows.append([(btn(lang, "admin"), "admin")])
@@ -91,12 +91,26 @@ def cancel_keyboard(lang: str, to: str = "menu") -> dict[str, Any]:
     return inline([[(btn(lang, "cancel"), f"cancel:{to}")]])
 
 
+
+
+def referral_keyboard(lang: str, bot_username: str, user_id: int) -> dict[str, Any]:
+    link = f"https://t.me/{bot_username}?start=ref_{user_id}"
+    share_text = "Invite friends to Ghostly Guard and earn 30% from their purchases." if lang == "en" else "Приглашай друзей в Ghostly Guard и получай 30% от их покупок." if lang == "ru" else "Запрошуй друзів у Ghostly Guard і отримуй 30% з їхніх покупок."
+    share_url = "https://t.me/share/url?url=" + link + "&text=" + share_text.replace(" ", "%20")
+    return {
+        "inline_keyboard": [
+            [{"text": "📤 Share link" if lang == "en" else "📤 Поделиться ссылкой" if lang == "ru" else "📤 Поділитися посиланням", "url": share_url}],
+            [{"text": btn(lang, "back"), "callback_data": "menu"}],
+        ]
+    }
+
 def admin_menu(lang: str) -> dict[str, Any]:
     return inline([
         [(btn(lang, "admin_stats"), "admin_stats"), (btn(lang, "admin_pending"), "admin_pending")],
         [(btn(lang, "admin_plans"), "admin_plans"), (btn(lang, "admin_methods"), "admin_methods")],
         [(btn(lang, "admin_grant"), "admin_grant"), (btn(lang, "admin_revoke"), "admin_revoke")],
         [(btn(lang, "admin_settings"), "admin_settings"), (btn(lang, "admin_users"), "admin_users")],
+        [(btn(lang, "admin_referrals"), "admin_referrals")],
         [(btn(lang, "back"), "menu")],
     ])
 
@@ -159,6 +173,7 @@ def admin_single_payment_keyboard(lang: str, payment_id: int) -> dict[str, Any]:
 def admin_settings_keyboard(lang: str) -> dict[str, Any]:
     return inline([
         [("🎁 Free delete limit", "adm_set_setting:free_deleted_limit_per_day")],
+        [("🤝 Referral percent", "adm_set_setting:referral_percent")],
         [("🧹 Free retention hours", "adm_set_setting:free_retention_hours")],
         [("🗄 Paid retention days", "adm_set_setting:message_retention_days")],
         [("🎬 Завантажити відео-інструкцію", "adm_upload_connect_video")],

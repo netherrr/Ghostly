@@ -32,6 +32,7 @@ from keyboards import (
     manual_payment_keyboard,
     payment_methods_keyboard,
     plans_keyboard,
+    referral_keyboard,
 )
 
 
@@ -58,6 +59,24 @@ def plan_name(plan: dict[str, Any] | None, lang: str) -> str:
 
 def plan_features(plan: dict[str, Any], lang: str) -> str:
     return str(plan.get(f"features_{lang}") or plan.get("features_en") or "")
+
+
+def plan_duration_label(days: int | str | None, lang: str) -> str:
+    try:
+        d = int(days or 0)
+    except Exception:
+        d = 0
+    if d >= 30000:
+        return "назавжди" if lang == "uk" else "навсегда" if lang == "ru" else "lifetime"
+    if d == 30:
+        return "1 місяць" if lang == "uk" else "1 месяц" if lang == "ru" else "1 month"
+    if d == 90:
+        return "3 місяці" if lang == "uk" else "3 месяца" if lang == "ru" else "3 months"
+    if d == 180:
+        return "6 місяців" if lang == "uk" else "6 месяцев" if lang == "ru" else "6 months"
+    if d == 365:
+        return "1 рік" if lang == "uk" else "1 год" if lang == "ru" else "1 year"
+    return f"{d} днів" if lang == "uk" else f"{d} дней" if lang == "ru" else f"{d} days"
 
 
 def method_title(method: dict[str, Any], lang: str) -> str:
@@ -140,6 +159,10 @@ TEMPLATE_ALIASES = {
     "видалені": "deleted",
     "удаленные": "deleted",
     "удалённые": "deleted",
+    "referrals": "referrals",
+    "referral": "referrals",
+    "реферали": "referrals",
+    "рефералы": "referrals",
 }
 
 DYNAMIC_TEMPLATE_SPECS = {
@@ -173,6 +196,14 @@ DYNAMIC_TEMPLATE_SPECS = {
             "uk": "👻 Останні видалені\n\nЗнайдено: {deleted_count}\n\n{deleted_messages_list}",
             "ru": "👻 Последние удалённые\n\nНайдено: {deleted_count}\n\n{deleted_messages_list}",
             "en": "👻 Last deleted\n\nFound: {deleted_count}\n\n{deleted_messages_list}",
+        },
+    },
+    "referrals": {
+        "vars": ["referral_link", "referral_percent", "invited_count", "purchases_count", "earned_total", "available_total", "paid_total"],
+        "default": {
+            "uk": "🤝 Реферальна система\n\nЗапрошуй друзів у Ghostly Guard і отримуй {referral_percent}% з кожної їхньої покупки.\n\n🔗 Твоє посилання:\n{referral_link}\n\n👥 Запрошено: {invited_count}\n🛒 Покупок: {purchases_count}\n💰 Зароблено: ${earned_total}\n💵 Доступно: ${available_total}\n✅ Виплачено: ${paid_total}",
+            "ru": "🤝 Реферальная система\n\nПриглашай друзей в Ghostly Guard и получай {referral_percent}% с каждой их покупки.\n\n🔗 Твоя ссылка:\n{referral_link}\n\n👥 Приглашено: {invited_count}\n🛒 Покупок: {purchases_count}\n💰 Заработано: ${earned_total}\n💵 Доступно: ${available_total}\n✅ Выплачено: ${paid_total}",
+            "en": "🤝 Referral system\n\nInvite friends to Ghostly Guard and earn {referral_percent}% from every purchase they make.\n\n🔗 Your link:\n{referral_link}\n\n👥 Invited: {invited_count}\n🛒 Purchases: {purchases_count}\n💰 Earned: ${earned_total}\n💵 Available: ${available_total}\n✅ Paid: ${paid_total}",
         },
     },
 }
@@ -385,6 +416,8 @@ def detect_template_from_target(target: dict[str, Any] | None, lang: str) -> str
         return f"keywords_{lang}"
     if any(x in low for x in ["останні видалені", "последние удал", "last deleted", "deleted found", "видалених повідомлень", "удалённых сообщений"]):
         return f"deleted_{lang}"
+    if any(x in low for x in ["реферальна система", "реферальная система", "referral system", "referral_link", "твоя ссылка", "твоє посилання", "your link", "запрошуй друзів", "приглашай друзей"]):
+        return f"referrals_{lang}"
     if any(x in low for x in ["ghostly", "що я вмію", "что я умею", "what i can", "особистий захист", "личный защит", "telegram-чат"]):
         return f"start_{lang}"
     return None
@@ -402,15 +435,18 @@ def message_text_and_entities(msg: dict[str, Any]) -> tuple[str, list[dict[str, 
 def edit_content_from_message(msg: dict[str, Any]) -> tuple[str, list[dict[str, Any]], dict[str, Any] | None]:
     """Return replacement text/entities and optional media for the admin template editor.
 
-    Supports: text-only, photo+caption, video+caption, animation+caption and document+caption.
+    Supports: text-only, photo+caption, video+caption, animation+caption, document+caption and sticker-only.
     Premium custom emoji and rich formatting are preserved through Telegram entities.
     """
     text, entities = message_text_and_entities(msg)
     media = extract_message_attachment(msg)
-    if media.get("kind") not in {"photo", "video", "animation", "document"} or not media.get("file_id"):
+    if media.get("kind") not in {"photo", "video", "animation", "document", "sticker"} or not media.get("file_id"):
         media_obj = None
     else:
         media_obj = {"kind": media.get("kind"), "file_id": media.get("file_id")}
+        if media.get("kind") == "sticker":
+            # Telegram stickers cannot have captions. Keep it as media-only.
+            text, entities = "", []
     return text, entities, media_obj
 
 
@@ -520,6 +556,14 @@ class BotHandlers:
             await self.db.clear_state(tg_id)
 
         if text.startswith("/start"):
+            parts = text.split(maxsplit=1)
+            if len(parts) > 1 and parts[1].startswith("ref_"):
+                try:
+                    referrer_id = int(parts[1].split("_", 1)[1])
+                    if await self.db.set_referrer(tg_id, referrer_id):
+                        await self.bot.send_message(tg_id, "🤝 <b>Реферальне запрошення прийнято.</b>")
+                except Exception:
+                    pass
             await self.show_start(tg_id, lang, is_admin)
         elif text in {"/language", "/lang"}:
             await self.bot.send_message(tg_id, tr(lang, "choose_lang"), lang_keyboard())
@@ -891,7 +935,7 @@ class BotHandlers:
         plans = await self.db.plans(active_only=True)
         plan_lines = []
         for p in plans:
-            plan_lines.append(tr(lang, "plan_line", name=e(plan_name(p, lang)), price=e(p["price_usd"]), days=p["duration_days"], features=e(plan_features(p, lang)).replace("\n", "\n")))
+            plan_lines.append(tr(lang, "plan_line", name=e(plan_name(p, lang)), price=e(p["price_usd"]), days=e(plan_duration_label(p.get("duration_days"), lang)), features=e(plan_features(p, lang)).replace("\n", "\n")))
         tpl = await self.db.get_template(f"plans_{lang}")
         if tpl:
             values = {"plans_list": "\n\n".join(plan_lines)}
@@ -995,6 +1039,77 @@ class BotHandlers:
         title = "👻 <b>Last deleted</b>" if lang == "en" else "👻 <b>Останні видалені</b>" if lang == "uk" else "👻 <b>Последние удалённые</b>"
         await self._send_or_edit(tg_id, f"{title}\n\n{deleted_list}", back_menu(lang), edit)
 
+
+
+    def bot_username(self) -> str:
+        return str(getattr(self.settings, "bot_username", None) or "GhostlyGuardBot").lstrip("@")
+
+    def referral_link(self, tg_id: int) -> str:
+        return f"https://t.me/{self.bot_username()}?start=ref_{int(tg_id)}"
+
+    async def show_referrals(self, tg_id: int, lang: str, edit: tuple[int, int] | None = None) -> None:
+        stats = await self.db.referral_stats(tg_id)
+        percent = await self.db.get_setting("referral_percent", 30)
+        values = {
+            "referral_link": self.referral_link(tg_id),
+            "referral_percent": str(percent),
+            "invited_count": str(stats.get("invited") or 0),
+            "purchases_count": str(stats.get("purchases") or 0),
+            "earned_total": str(stats.get("earned") or "0.00"),
+            "available_total": str(stats.get("available") or "0.00"),
+            "paid_total": str(stats.get("paid") or "0.00"),
+        }
+        tpl = await self.db.get_template(f"referrals_{lang}")
+        if tpl:
+            rendered, ents = render_dynamic_template(str(tpl.get("text") or ""), tpl.get("entities") or [], values)
+            media = tpl.get("media")
+            keyboard = referral_keyboard(lang, self.bot_username(), tg_id)
+            if media:
+                if edit:
+                    chat_id, message_id = edit
+                    try:
+                        await self.bot.delete_message(chat_id, message_id)
+                    except Exception:
+                        pass
+                await self.send_template_content(tg_id, rendered, ents, media, keyboard)
+            else:
+                await self._send_or_edit(tg_id, rendered, keyboard, edit, entities=ents)
+            return
+
+        if lang == "en":
+            text = (
+                f"🤝 <b>Referral system</b>\n\n"
+                f"Invite friends to Ghostly Guard and earn <b>{e(percent)}%</b> from every purchase they make.\n\n"
+                f"🔗 <b>Your link:</b>\n<code>{e(values['referral_link'])}</code>\n\n"
+                f"👥 Invited: <b>{e(values['invited_count'])}</b>\n"
+                f"🛒 Purchases: <b>{e(values['purchases_count'])}</b>\n"
+                f"💰 Earned: <b>${e(values['earned_total'])}</b>\n"
+                f"💵 Available: <b>${e(values['available_total'])}</b>\n"
+                f"✅ Paid: <b>${e(values['paid_total'])}</b>"
+            )
+        elif lang == "ru":
+            text = (
+                f"🤝 <b>Реферальная система</b>\n\n"
+                f"Приглашай друзей в Ghostly Guard и получай <b>{e(percent)}%</b> с каждой их покупки.\n\n"
+                f"🔗 <b>Твоя ссылка:</b>\n<code>{e(values['referral_link'])}</code>\n\n"
+                f"👥 Приглашено: <b>{e(values['invited_count'])}</b>\n"
+                f"🛒 Покупок: <b>{e(values['purchases_count'])}</b>\n"
+                f"💰 Заработано: <b>${e(values['earned_total'])}</b>\n"
+                f"💵 Доступно: <b>${e(values['available_total'])}</b>\n"
+                f"✅ Выплачено: <b>${e(values['paid_total'])}</b>"
+            )
+        else:
+            text = (
+                f"🤝 <b>Реферальна система</b>\n\n"
+                f"Запрошуй друзів у Ghostly Guard і отримуй <b>{e(percent)}%</b> з кожної їхньої покупки.\n\n"
+                f"🔗 <b>Твоє посилання:</b>\n<code>{e(values['referral_link'])}</code>\n\n"
+                f"👥 Запрошено: <b>{e(values['invited_count'])}</b>\n"
+                f"🛒 Покупок: <b>{e(values['purchases_count'])}</b>\n"
+                f"💰 Зароблено: <b>${e(values['earned_total'])}</b>\n"
+                f"💵 Доступно: <b>${e(values['available_total'])}</b>\n"
+                f"✅ Виплачено: <b>${e(values['paid_total'])}</b>"
+            )
+        await self._send_or_edit(tg_id, text, referral_keyboard(lang, self.bot_username(), tg_id), edit)
 
     async def _send_or_edit(
         self,
@@ -1134,6 +1249,8 @@ class BotHandlers:
             await self._send_or_edit(tg_id, tr(lang, "choose_lang"), lang_keyboard(), edit)
         elif data == "last_deleted":
             await self.show_last_deleted(tg_id, lang, edit)
+        elif data == "referrals":
+            await self.show_referrals(tg_id, lang, edit)
         elif data == "keywords":
             await self.show_keywords(tg_id, lang, edit)
         elif data == "kw_add":
@@ -1312,6 +1429,8 @@ class BotHandlers:
             await self.show_admin_stats(tg_id, lang, edit)
         elif data == "admin_pending":
             await self.show_admin_pending(tg_id, lang, edit)
+        elif data == "admin_referrals":
+            await self.show_admin_referrals(tg_id, lang, edit)
         elif data.startswith("admin_payment:"):
             await self.show_admin_payment(tg_id, lang, int(data.split(":", 1)[1]), edit)
         elif data.startswith("admin_proof:"):
@@ -1392,6 +1511,31 @@ class BotHandlers:
         s = await self.db.stats()
         await self._send_or_edit(tg_id, tr(lang, "stats", **{k: e(v) for k, v in s.items()}), back_menu(lang, "admin"), edit)
 
+    async def show_admin_referrals(self, tg_id: int, lang: str, edit: tuple[int, int] | None = None) -> None:
+        s = await self.db.admin_referral_stats()
+        lines = [
+            "🤝 <b>Реферальна система</b>",
+            "",
+            f"👥 Реферальних користувачів: <b>{e(s.get('referred_users') or 0)}</b>",
+            f"🛒 Реферальних покупок: <b>{e(s.get('reward_count') or 0)}</b>",
+            f"💳 Продажів через рефки: <b>${e(s.get('referred_sales') or '0.00')}</b>",
+            f"💰 Нараховано партнерам: <b>${e(s.get('rewards_total') or '0.00')}</b>",
+            f"💵 Доступно до виплати: <b>${e(s.get('rewards_available') or '0.00')}</b>",
+            f"✅ Виплачено: <b>${e(s.get('rewards_paid') or '0.00')}</b>",
+            "",
+            "🏆 <b>Топ партнерів:</b>",
+        ]
+        top = s.get("top") or []
+        if not top:
+            lines.append("— поки немає даних")
+        for row in top:
+            name = display_name(row) or str(row.get("tg_id"))
+            lines.append(
+                f"• <code>{e(row.get('tg_id'))}</code> @{e(row.get('username') or '')} {e(name)}\n"
+                f"  👥 {e(row.get('invited') or 0)} | 💰 ${e(row.get('earned') or '0.00')} | 💵 ${e(row.get('available') or '0.00')}"
+            )
+        await self._send_or_edit(tg_id, "\n".join(lines), back_menu(lang, "admin"), edit)
+
     async def show_admin_plans(self, tg_id: int, lang: str, edit: tuple[int, int] | None = None) -> None:
         plans = await self.db.plans(active_only=False)
         text = "💎 <b>Конструктор тарифів</b>\n\nОбери тариф, щоб змінити ціну, тривалість, назву, опис або активність."
@@ -1406,7 +1550,7 @@ class BotHandlers:
             f"💎 <b>Тариф #{p['id']} — {e(p['code'])}</b>\n\n"
             f"Статус: {'✅ активний' if p.get('is_active') else '⛔️ вимкнений'}\n"
             f"Ціна: <b>${e(p['price_usd'])}</b>\n"
-            f"Тривалість: <b>{e(p['duration_days'])} днів</b>\n"
+            f"Тривалість: <b>{e(plan_duration_label(p.get('duration_days'), lang))}</b>\n"
             f"Позиція: <b>{e(p['position'])}</b>\n\n"
             f"🇺🇦 {e(p['name_uk'])}\n{e(p['features_uk'])}\n\n"
             f"🇷🇺 {e(p['name_ru'])}\n{e(p['features_ru'])}\n\n"
