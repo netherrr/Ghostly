@@ -104,6 +104,89 @@ def proof_summary(proof: dict[str, Any] | None) -> str:
     return str(kind)
 
 
+SUPPORTED_EDIT_ENTITY_TYPES = {
+    "bold", "italic", "underline", "strikethrough", "spoiler", "code", "pre",
+    "text_link", "custom_emoji", "blockquote", "expandable_blockquote",
+}
+
+
+def utf16_len(text: str) -> int:
+    return len(text.encode("utf-16-le")) // 2
+
+
+def py_index_from_utf16(text: str, offset: int) -> int:
+    if offset <= 0:
+        return 0
+    total = 0
+    for idx, ch in enumerate(text):
+        step = utf16_len(ch)
+        if total + step > offset:
+            return idx
+        total += step
+        if total == offset:
+            return idx + 1
+    return len(text)
+
+
+def clean_entities_for_edit(entities: list[dict[str, Any]] | None, skip_utf16: int = 0) -> list[dict[str, Any]]:
+    """Copy Telegram entities after optional UTF-16 prefix removal.
+
+    This preserves Premium custom emoji (`custom_emoji_id`) and regular formatting.
+    Telegram uses UTF-16 offsets, so we must not calculate offsets with len().
+    """
+    cleaned: list[dict[str, Any]] = []
+    for ent in entities or []:
+        ent_type = ent.get("type")
+        if ent_type not in SUPPORTED_EDIT_ENTITY_TYPES:
+            continue
+        start = int(ent.get("offset") or 0)
+        length = int(ent.get("length") or 0)
+        if length <= 0:
+            continue
+        if start < skip_utf16:
+            # Do not try to keep partially-overlapping entities; command entity lives here.
+            continue
+        item = dict(ent)
+        item["offset"] = start - skip_utf16
+        cleaned.append(item)
+    return cleaned
+
+
+def command_payload_from_message(msg: dict[str, Any]) -> tuple[str, list[dict[str, Any]], int]:
+    """Return text/entities after `/edit` command and the skipped UTF-16 length."""
+    text = msg.get("text") or ""
+    entities = msg.get("entities") or []
+    command_len_utf16 = None
+    for ent in entities:
+        if ent.get("type") == "bot_command" and int(ent.get("offset") or 0) == 0:
+            command_len_utf16 = int(ent.get("length") or 0)
+            break
+    if command_len_utf16 is None:
+        command_len_utf16 = utf16_len("/edit")
+    idx = py_index_from_utf16(text, command_len_utf16)
+    while idx < len(text) and text[idx] in {" ", "\n", "\t"}:
+        idx += 1
+    skip = utf16_len(text[:idx])
+    return text[idx:], clean_entities_for_edit(entities, skip), skip
+
+
+def message_text_and_entities(msg: dict[str, Any]) -> tuple[str, list[dict[str, Any]]]:
+    """Read a normal admin message as rich Telegram text for /edit state mode."""
+    if msg.get("text") is not None:
+        return msg.get("text") or "", clean_entities_for_edit(msg.get("entities") or [], 0)
+    if msg.get("caption") is not None:
+        return msg.get("caption") or "", clean_entities_for_edit(msg.get("caption_entities") or [], 0)
+    return "", []
+
+
+def target_edit_mode(target: dict[str, Any] | None) -> str:
+    if not target:
+        return "text"
+    if target.get("text") is not None:
+        return "text"
+    return "caption"
+
+
 def state_prompt(lang: str, state: str, payload: dict[str, Any]) -> str:
     if state == "keyword_add":
         return {
@@ -125,6 +208,8 @@ def state_prompt(lang: str, state: str, payload: dict[str, Any]) -> str:
         return "📎 Надішли квитанцію/скрін/фото/відео/файл або текстовий коментар по оплаті. Після цього заявка піде адміну на перевірку."
     if state == "admin_upload_connect_video":
         return "🎬 Надішли відео-інструкцію файлом/відео в цей чат. Я збережу file_id і буду показувати її користувачам у розділі «Як підключити»."
+    if state == "admin_edit_message":
+        return "✏️ Надішли новий текст для повідомлення. Можна використовувати Premium emoji, жирний, курсив, посилання та перенос рядків."
     if state == "admin_create_plan":
         return "➕ Надішли новий тариф у форматі:\n<code>code price days Назва тарифу</code>\n\nПриклад:\n<code>vip_week 0.99 7 VIP 7 днів</code>"
     return "Надішли значення або натисни Скасувати."
@@ -180,6 +265,9 @@ class BotHandlers:
             if state_name == "admin_upload_connect_video" and is_admin:
                 await self.handle_admin_upload_connect_video(tg_id, lang, msg, state)
                 return
+            if state_name == "admin_edit_message" and is_admin:
+                await self.handle_admin_edit_content(tg_id, lang, msg, state)
+                return
             if text:
                 await self.handle_state_input(tg_id, lang, text, state, is_admin)
                 return
@@ -213,12 +301,106 @@ class BotHandlers:
         elif text == "/forget_me":
             await self.db.forget_user(tg_id)
             await self.bot.send_message(tg_id, tr(lang, "forgotten"), main_menu(lang, is_admin))
+        elif text.startswith("/edit") and is_admin:
+            await self.handle_edit_command(tg_id, lang, msg)
         elif text.startswith("/") and is_admin:
             await self.handle_admin_command(tg_id, text, lang)
         elif text.startswith("/"):
             await self.bot.send_message(tg_id, tr(lang, "unknown_command"), main_menu(lang, is_admin))
         else:
             await self.bot.send_message(tg_id, tr(lang, "menu"), main_menu(lang, is_admin))
+
+    async def handle_edit_command(self, tg_id: int, lang: str, msg: dict[str, Any]) -> None:
+        if not await self.db.is_admin(tg_id):
+            await self.bot.send_message(tg_id, tr(lang, "not_admin"))
+            return
+
+        target = msg.get("reply_to_message")
+        if not target or not target.get("message_id"):
+            await self.bot.send_message(
+                tg_id,
+                "✏️ <b>/edit</b> працює тільки відповіддю на повідомлення бота.\n\n"
+                "Як користуватись:\n"
+                "1. Відповідай на потрібне повідомлення командою <code>/edit</code>.\n"
+                "2. Потім надішли новий текст з Premium emoji / форматуванням.\n\n"
+                "Швидкий варіант: <code>/edit Новий текст</code>",
+            )
+            return
+
+        target_from = target.get("from") or {}
+        if target_from and target_from.get("is_bot") is False:
+            await self.bot.send_message(tg_id, "⚠️ Я можу редагувати тільки повідомлення, які надіслав цей бот.")
+            return
+
+        new_text, entities, _ = command_payload_from_message(msg)
+        payload = {
+            "target_chat_id": int((msg.get("chat") or {}).get("id", tg_id)),
+            "target_message_id": int(target["message_id"]),
+            "mode": target_edit_mode(target),
+            "reply_markup": target.get("reply_markup"),
+        }
+
+        if not new_text.strip():
+            await self.db.set_state(tg_id, "admin_edit_message", payload)
+            await self.bot.send_message(
+                tg_id,
+                "✏️ <b>Режим редагування увімкнено.</b>\n\n"
+                "Тепер надішли новий текст одним повідомленням.\n"
+                "Можна додавати Premium emoji, жирний/курсивний текст, посилання і перенос рядків.\n\n"
+                "Скасувати: /start",
+            )
+            return
+
+        await self.perform_admin_edit(tg_id, lang, payload, new_text, entities)
+
+    async def handle_admin_edit_content(self, tg_id: int, lang: str, msg: dict[str, Any], state_row: dict[str, Any]) -> None:
+        payload = state_row.get("payload") or {}
+        text, entities = message_text_and_entities(msg)
+        if not text.strip():
+            await self.bot.send_message(tg_id, state_prompt(lang, "admin_edit_message", payload), cancel_keyboard(lang, "admin"))
+            return
+        await self.perform_admin_edit(tg_id, lang, payload, text, entities)
+
+    async def perform_admin_edit(
+        self,
+        tg_id: int,
+        lang: str,
+        payload: dict[str, Any],
+        text: str,
+        entities: list[dict[str, Any]] | None,
+    ) -> None:
+        target_chat_id = int(payload.get("target_chat_id") or tg_id)
+        target_message_id = int(payload.get("target_message_id") or 0)
+        mode = str(payload.get("mode") or "text")
+        reply_markup = payload.get("reply_markup")
+        if not target_message_id:
+            await self.db.clear_state(tg_id)
+            await self.bot.send_message(tg_id, "❌ Не знайшов повідомлення для редагування. Спробуй ще раз: reply → /edit")
+            return
+
+        try:
+            if mode == "caption":
+                await self.bot.edit_message_caption(target_chat_id, target_message_id, text, reply_markup=reply_markup, caption_entities=entities or [])
+            else:
+                await self.bot.edit_message_text(target_chat_id, target_message_id, text, reply_markup=reply_markup, entities=entities or [])
+            await self.db.clear_state(tg_id)
+            await self.bot.send_message(
+                tg_id,
+                "✅ <b>Повідомлення оновлено.</b>\n\n"
+                "Premium emoji та форматування збережені, якщо Telegram дозволив їх використати для цього бота.",
+            )
+        except Exception as exc:
+            await self.db.clear_state(tg_id)
+            await self.bot.send_message(
+                tg_id,
+                "❌ <b>Не вдалося відредагувати повідомлення.</b>\n\n"
+                "Можливі причини:\n"
+                "• це повідомлення надіслав не цей бот;\n"
+                "• воно занадто старе або Telegram не дозволяє його редагувати;\n"
+                "• текст/emoji має некоректне форматування;\n"
+                "• ти відповів не на те повідомлення.\n\n"
+                f"Технічна помилка:\n<code>{e(repr(exc))}</code>",
+            )
 
     async def handle_state_input(self, tg_id: int, lang: str, text: str, state_row: dict[str, Any], is_admin: bool) -> None:
         state = state_row.get("state")

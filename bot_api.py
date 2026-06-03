@@ -76,17 +76,43 @@ class BotAPI:
         message_id: int,
         text: str,
         reply_markup: dict[str, Any] | None = None,
+        entities: list[dict[str, Any]] | None = None,
+        disable_web_page_preview: bool = True,
     ) -> dict[str, Any]:
-        payload = {
+        payload: dict[str, Any] = {
             "chat_id": chat_id,
             "message_id": message_id,
             "text": text,
-            "parse_mode": "HTML",
-            "disable_web_page_preview": True,
+            "disable_web_page_preview": disable_web_page_preview,
         }
+        if entities is not None:
+            payload["entities"] = entities
+        else:
+            payload["parse_mode"] = "HTML"
         if reply_markup:
             payload["reply_markup"] = reply_markup
         return await self.request("editMessageText", payload)
+
+    async def edit_message_caption(
+        self,
+        chat_id: int | str,
+        message_id: int,
+        caption: str,
+        reply_markup: dict[str, Any] | None = None,
+        caption_entities: list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "chat_id": chat_id,
+            "message_id": message_id,
+            "caption": caption[:1024],
+        }
+        if caption_entities is not None:
+            payload["caption_entities"] = caption_entities
+        else:
+            payload["parse_mode"] = "HTML"
+        if reply_markup:
+            payload["reply_markup"] = reply_markup
+        return await self.request("editMessageCaption", payload)
 
     async def answer_callback_query(self, callback_query_id: str, text: str | None = None, show_alert: bool = False) -> dict[str, Any]:
         payload: dict[str, Any] = {"callback_query_id": callback_query_id, "show_alert": show_alert}

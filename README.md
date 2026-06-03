@@ -175,3 +175,27 @@ This build adds:
 - admin can upload a guide video/media for “How to connect”;
 - admin can set a guide video URL in settings.
 
+
+## Admin rich edit with Premium emoji
+
+The bot supports an admin-only `/edit` helper for polishing bot messages after deployment.
+
+### Mode 1 — safer for Premium emoji and multiline text
+1. Reply to any message sent by the bot with `/edit`.
+2. Send the new text as a separate message.
+3. The bot edits the replied bot message and preserves Telegram entities, including custom emoji.
+
+### Mode 2 — quick inline edit
+Reply to a bot message with:
+
+```text
+/edit New text here
+```
+
+This also supports custom emoji/entities that are placed after the `/edit` command.
+
+Notes:
+- Works only for admins from `ADMIN_IDS` / database admins.
+- Works only with messages sent by this bot.
+- Preserves inline keyboard buttons when possible.
+- For Premium/custom emoji, use native Telegram emoji/entities in your admin message, not HTML tags.
