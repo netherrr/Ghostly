@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import html
 import json
+import re
 from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any
@@ -167,17 +168,30 @@ def clean_entities_for_edit(entities: list[dict[str, Any]] | None, skip_utf16: i
 
 
 def command_payload_from_message(msg: dict[str, Any]) -> tuple[str, list[dict[str, Any]], int]:
-    """Return text/entities after `/edit` command and the skipped UTF-16 length."""
+    """Return text/entities after `/edit` command and the skipped UTF-16 length.
+
+    This is intentionally conservative: Telegram can send command entities in
+    slightly different ways when the admin replies, quotes text, or uses
+    /edit@BotName. We first strip the visible command with a regex, then fall
+    back to Telegram entities. This prevents the literal `/edit` from being
+    saved into the edited message.
+    """
     text = msg.get("text") or ""
     entities = msg.get("entities") or []
-    command_len_utf16 = None
-    for ent in entities:
-        if ent.get("type") == "bot_command" and int(ent.get("offset") or 0) == 0:
-            command_len_utf16 = int(ent.get("length") or 0)
-            break
-    if command_len_utf16 is None:
-        command_len_utf16 = utf16_len("/edit")
-    idx = py_index_from_utf16(text, command_len_utf16)
+
+    m = re.match(r"^/edit(?:@[A-Za-z0-9_]+)?(?=\s|$)", text)
+    if m:
+        idx = m.end()
+    else:
+        command_len_utf16 = None
+        for ent in entities:
+            if ent.get("type") == "bot_command" and int(ent.get("offset") or 0) == 0:
+                command_len_utf16 = int(ent.get("length") or 0)
+                break
+        if command_len_utf16 is None:
+            command_len_utf16 = utf16_len("/edit")
+        idx = py_index_from_utf16(text, command_len_utf16)
+
     while idx < len(text) and text[idx] in {" ", "\n", "\t"}:
         idx += 1
     skip = utf16_len(text[:idx])
@@ -203,6 +217,38 @@ def parse_template_prefix(text: str, entities: list[dict[str, Any]], lang: str) 
         start_idx += 1
     key = f"{template}_{lang}"
     return key, text[start_idx:], clean_entities_for_edit(entities, utf16_len(text[:start_idx]))
+
+def strip_accidental_edit_prefix(text: str, entities: list[dict[str, Any]]) -> tuple[str, list[dict[str, Any]]]:
+    """If admin sends `/edit ...` as the replacement text, strip it too."""
+    m = re.match(r"^/edit(?:@[A-Za-z0-9_]+)?(?=\s|$)", text or "")
+    if not m:
+        return text, entities
+    idx = m.end()
+    while idx < len(text) and text[idx] in {" ", "\n", "\t"}:
+        idx += 1
+    skip = utf16_len(text[:idx])
+    return text[idx:], clean_entities_for_edit(entities, skip)
+
+
+def detect_template_from_target(target: dict[str, Any] | None, lang: str) -> str | None:
+    """Auto-detect which reusable template an edited bot message belongs to.
+
+    This makes the UX simple: reply to the visible bot message with `/edit new text`,
+    and if it looks like a known screen, we save it permanently for future use.
+    """
+    if not target:
+        return None
+    text = str(target.get("text") or target.get("caption") or "")
+    low = text.lower()
+    if any(x in low for x in ["ghostly", "що я вмію", "что я умею", "what i can", "особистий захист", "личный защит", "telegram-чат"]):
+        return f"start_{lang}"
+    if any(x in low for x in ["як підключити", "как подключить", "how to connect", "telegram business", "chatbots", "чат-бот"]):
+        return f"connect_{lang}"
+    if any(x in low for x in ["business-підключення активовано", "business-подключение актив", "business connection activated"]):
+        return f"business_connected_{lang}"
+    if any(x in low for x in ["приватність", "приватность", "privacy", "forget_me", "видалити мої дані", "удалить мои данные"]):
+        return f"privacy_{lang}"
+    return None
 
 
 def message_text_and_entities(msg: dict[str, Any]) -> tuple[str, list[dict[str, Any]]]:
@@ -294,26 +340,30 @@ class BotHandlers:
         text = (msg.get("text") or "").strip()
         is_admin = await self.db.is_admin(tg_id)
 
-        if text.startswith("/"):
-            await self.db.clear_state(tg_id)
-
         state = await self.db.get_state(tg_id)
-        if state and not text.startswith("/"):
+        if state:
             state_name = str(state.get("state") or "")
-            if state_name == "manual_payment_proof":
+            if text in {"/start", "/cancel"}:
+                await self.db.clear_state(tg_id)
+                await self.show_start(tg_id, lang, is_admin)
+                return
+            if state_name == "manual_payment_proof" and not text.startswith("/"):
                 await self.handle_payment_proof_message(tg_id, lang, msg, state, is_admin)
                 return
-            if state_name == "admin_upload_connect_video" and is_admin:
+            if state_name == "admin_upload_connect_video" and is_admin and not text.startswith("/"):
                 await self.handle_admin_upload_connect_video(tg_id, lang, msg, state)
                 return
             if state_name == "admin_edit_message" and is_admin:
+                # Important: allow replacement text to start with /edit too.
                 await self.handle_admin_edit_content(tg_id, lang, msg, state)
                 return
-            if text:
-                await self.handle_state_input(tg_id, lang, text, state, is_admin)
+            if not text.startswith("/"):
+                if text:
+                    await self.handle_state_input(tg_id, lang, text, state, is_admin)
+                    return
+                await self.bot.send_message(tg_id, state_prompt(lang, state_name, state.get("payload") or {}), cancel_keyboard(lang, "admin" if is_admin else "menu"))
                 return
-            await self.bot.send_message(tg_id, state_prompt(lang, state_name, state.get("payload") or {}), cancel_keyboard(lang, "admin" if is_admin else "menu"))
-            return
+            await self.db.clear_state(tg_id)
 
         if text.startswith("/start"):
             await self.show_start(tg_id, lang, is_admin)
@@ -375,25 +425,29 @@ class BotHandlers:
 
         new_text, entities, _ = command_payload_from_message(msg)
         template_key, new_text, entities = parse_template_prefix(new_text, entities, lang)
+        auto_template_key = detect_template_from_target(target, lang)
+        if not template_key:
+            template_key = auto_template_key
         payload = {
             "target_chat_id": int((msg.get("chat") or {}).get("id", tg_id)),
             "target_message_id": int(target["message_id"]),
             "mode": target_edit_mode(target),
             "reply_markup": target.get("reply_markup"),
             "template_key": template_key,
+            "auto_template_key": auto_template_key,
         }
 
         if not new_text.strip():
             await self.db.set_state(tg_id, "admin_edit_message", payload)
-            extra = (
-                f"\n\n🧩 <b>Шаблон:</b> <code>{e(template_key)}</code> буде збережено для майбутніх повідомлень."
-                if template_key else ""
-            )
+            if template_key:
+                extra = f"\n\n🧩 <b>Я визначив цей екран як шаблон:</b> <code>{e(template_key)}</code>. Новий текст збережу назавжди."
+            else:
+                extra = "\n\nℹ️ Це буде разове редагування конкретного повідомлення."
             await self.bot.send_message(
                 tg_id,
                 "✏️ <b>Режим редагування увімкнено.</b>\n\n"
-                "Тепер надішли новий текст одним повідомленням.\n"
-                "Можна додавати Premium emoji, жирний/курсивний текст, посилання і перенос рядків."
+                "Тепер надішли <b>тільки новий текст</b> одним повідомленням — без /edit на початку.\n"
+                "Premium emoji, жирний/курсивний текст, посилання і перенос рядків збережуться."
                 f"{extra}\n\n"
                 "Скасувати: /start",
             )
@@ -404,6 +458,7 @@ class BotHandlers:
     async def handle_admin_edit_content(self, tg_id: int, lang: str, msg: dict[str, Any], state_row: dict[str, Any]) -> None:
         payload = state_row.get("payload") or {}
         text, entities = message_text_and_entities(msg)
+        text, entities = strip_accidental_edit_prefix(text, entities)
         if not text.strip():
             await self.bot.send_message(tg_id, state_prompt(lang, "admin_edit_message", payload), cancel_keyboard(lang, "admin"))
             return
@@ -435,7 +490,10 @@ class BotHandlers:
             if template_key:
                 await self.db.set_template(str(template_key), text, entities or [])
             await self.db.clear_state(tg_id)
-            saved_line = f"\n\n🧩 Шаблон <code>{e(template_key)}</code> збережено. Тепер він буде використовуватись у майбутніх повідомленнях." if template_key else ""
+            saved_line = (
+                f"\n\n🧩 <b>Шаблон збережено:</b> <code>{e(template_key)}</code>. Тепер /start або відповідний розділ буде показувати саме цей текст."
+                if template_key else "\n\nℹ️ Це було разове редагування. Для постійного збереження відповідай на екран /start або пиши <code>/edit start</code>."
+            )
             await self.bot.send_message(
                 tg_id,
                 "✅ <b>Повідомлення оновлено.</b>"
