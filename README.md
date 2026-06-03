@@ -199,3 +199,25 @@ Notes:
 - Works only with messages sent by this bot.
 - Preserves inline keyboard buttons when possible.
 - For Premium/custom emoji, use native Telegram emoji/entities in your admin message, not HTML tags.
+
+## Rich text templates with Premium emoji
+
+`/edit` edits a single bot message only. To make edited text persist for future users, use template mode:
+
+1. Reply to the bot message you want to use as a base.
+2. Send `/edit start` to edit and save the start/welcome template for your current language.
+3. Send the new rich text with Telegram Premium emoji and formatting.
+4. The bot edits the current message and saves it in DB. Future `/start` messages will use this template.
+
+Supported template keys:
+
+- `/edit start` — welcome message used on `/start`
+- `/edit connect` — “How to connect” screen
+- `/edit business` — message after Telegram Business connection is enabled
+- `/edit privacy` — privacy screen
+
+Quick mode also works:
+
+`/edit start Your new text here`
+
+Templates are language-specific. If your admin language is Ukrainian, `/edit start` saves `start_uk`. Switch language to RU/EN and repeat to save `start_ru` or `start_en`.

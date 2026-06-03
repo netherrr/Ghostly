@@ -761,6 +761,20 @@ class Database:
         val = await self.get_setting(key, default)
         return int(val)
 
+    async def set_template(self, key: str, text: str, entities: list[dict[str, Any]] | None = None) -> None:
+        payload = {"text": text, "entities": entities or []}
+        await self.set_setting(f"template_{key}", payload)
+
+    async def get_template(self, key: str) -> dict[str, Any] | None:
+        value = await self.get_setting(f"template_{key}", None)
+        value = decode_json(value, None)
+        if isinstance(value, dict) and isinstance(value.get("text"), str):
+            entities = value.get("entities") or []
+            if not isinstance(entities, list):
+                entities = []
+            return {"text": value.get("text") or "", "entities": entities}
+        return None
+
     async def set_state(self, user_id: int, state: str, payload: dict[str, Any] | None = None) -> None:
         async with self._pool().acquire() as con:
             await con.execute(

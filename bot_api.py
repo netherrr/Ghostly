@@ -59,13 +59,17 @@ class BotAPI:
         text: str,
         reply_markup: dict[str, Any] | None = None,
         disable_web_page_preview: bool = True,
+        entities: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         payload = {
             "chat_id": chat_id,
             "text": text,
-            "parse_mode": "HTML",
             "disable_web_page_preview": disable_web_page_preview,
         }
+        if entities is not None:
+            payload["entities"] = entities
+        else:
+            payload["parse_mode"] = "HTML"
         if reply_markup:
             payload["reply_markup"] = reply_markup
         return await self.request("sendMessage", payload)

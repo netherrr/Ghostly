@@ -109,6 +109,20 @@ SUPPORTED_EDIT_ENTITY_TYPES = {
     "text_link", "custom_emoji", "blockquote", "expandable_blockquote",
 }
 
+TEMPLATE_ALIASES = {
+    "start": "start",
+    "старт": "start",
+    "connect": "connect",
+    "підключити": "connect",
+    "подключить": "connect",
+    "business": "business_connected",
+    "бізнес": "business_connected",
+    "бизнес": "business_connected",
+    "privacy": "privacy",
+    "приватність": "privacy",
+    "приватность": "privacy",
+}
+
 
 def utf16_len(text: str) -> int:
     return len(text.encode("utf-16-le")) // 2
@@ -170,6 +184,27 @@ def command_payload_from_message(msg: dict[str, Any]) -> tuple[str, list[dict[st
     return text[idx:], clean_entities_for_edit(entities, skip), skip
 
 
+def parse_template_prefix(text: str, entities: list[dict[str, Any]], lang: str) -> tuple[str | None, str, list[dict[str, Any]]]:
+    """Parse `/edit start` / `/edit connect` smart template mode.
+
+    If the first word after /edit is a known template key, the edited text is
+    also saved into DB and reused for future /start/callback messages.
+    """
+    stripped = text.lstrip()
+    leading_py = len(text) - len(stripped)
+    if not stripped:
+        return None, text, entities
+    first = stripped.split(maxsplit=1)[0].lower().strip()
+    template = TEMPLATE_ALIASES.get(first)
+    if not template:
+        return None, text, entities
+    start_idx = leading_py + len(stripped.split(maxsplit=1)[0])
+    while start_idx < len(text) and text[start_idx] in {" ", "\n", "\t"}:
+        start_idx += 1
+    key = f"{template}_{lang}"
+    return key, text[start_idx:], clean_entities_for_edit(entities, utf16_len(text[:start_idx]))
+
+
 def message_text_and_entities(msg: dict[str, Any]) -> tuple[str, list[dict[str, Any]]]:
     """Read a normal admin message as rich Telegram text for /edit state mode."""
     if msg.get("text") is not None:
@@ -209,6 +244,12 @@ def state_prompt(lang: str, state: str, payload: dict[str, Any]) -> str:
     if state == "admin_upload_connect_video":
         return "🎬 Надішли відео-інструкцію файлом/відео в цей чат. Я збережу file_id і буду показувати її користувачам у розділі «Як підключити»."
     if state == "admin_edit_message":
+        template_key = payload.get("template_key")
+        if template_key:
+            return (
+                f"✏️ Надішли новий текст для шаблону <code>{e(template_key)}</code>.\n"
+                "Я оновлю поточне повідомлення і збережу цей текст для майбутніх показів."
+            )
         return "✏️ Надішли новий текст для повідомлення. Можна використовувати Premium emoji, жирний, курсив, посилання та перенос рядків."
     if state == "admin_create_plan":
         return "➕ Надішли новий тариф у форматі:\n<code>code price days Назва тарифу</code>\n\nПриклад:\n<code>vip_week 0.99 7 VIP 7 днів</code>"
@@ -333,20 +374,27 @@ class BotHandlers:
             return
 
         new_text, entities, _ = command_payload_from_message(msg)
+        template_key, new_text, entities = parse_template_prefix(new_text, entities, lang)
         payload = {
             "target_chat_id": int((msg.get("chat") or {}).get("id", tg_id)),
             "target_message_id": int(target["message_id"]),
             "mode": target_edit_mode(target),
             "reply_markup": target.get("reply_markup"),
+            "template_key": template_key,
         }
 
         if not new_text.strip():
             await self.db.set_state(tg_id, "admin_edit_message", payload)
+            extra = (
+                f"\n\n🧩 <b>Шаблон:</b> <code>{e(template_key)}</code> буде збережено для майбутніх повідомлень."
+                if template_key else ""
+            )
             await self.bot.send_message(
                 tg_id,
                 "✏️ <b>Режим редагування увімкнено.</b>\n\n"
                 "Тепер надішли новий текст одним повідомленням.\n"
-                "Можна додавати Premium emoji, жирний/курсивний текст, посилання і перенос рядків.\n\n"
+                "Можна додавати Premium emoji, жирний/курсивний текст, посилання і перенос рядків."
+                f"{extra}\n\n"
                 "Скасувати: /start",
             )
             return
@@ -383,10 +431,15 @@ class BotHandlers:
                 await self.bot.edit_message_caption(target_chat_id, target_message_id, text, reply_markup=reply_markup, caption_entities=entities or [])
             else:
                 await self.bot.edit_message_text(target_chat_id, target_message_id, text, reply_markup=reply_markup, entities=entities or [])
+            template_key = payload.get("template_key")
+            if template_key:
+                await self.db.set_template(str(template_key), text, entities or [])
             await self.db.clear_state(tg_id)
+            saved_line = f"\n\n🧩 Шаблон <code>{e(template_key)}</code> збережено. Тепер він буде використовуватись у майбутніх повідомленнях." if template_key else ""
             await self.bot.send_message(
                 tg_id,
-                "✅ <b>Повідомлення оновлено.</b>\n\n"
+                "✅ <b>Повідомлення оновлено.</b>"
+                f"{saved_line}\n\n"
                 "Premium emoji та форматування збережені, якщо Telegram дозволив їх використати для цього бота.",
             )
         except Exception as exc:
@@ -487,17 +540,28 @@ class BotHandlers:
             await self.bot.send_message(tg_id, f"❌ Помилка:\n<code>{e(repr(exc))}</code>", cancel_keyboard(lang, "admin" if is_admin else "menu"))
 
     async def show_start(self, tg_id: int, lang: str, is_admin: bool) -> None:
+        tpl = await self.db.get_template(f"start_{lang}")
+        if tpl:
+            await self.bot.send_message(tg_id, tpl["text"], main_menu(lang, is_admin), entities=tpl.get("entities") or [])
+            return
         await self.bot.send_message(tg_id, tr(lang, "start", app=e(self.settings.app_name)), main_menu(lang, is_admin))
 
     async def show_connect(self, tg_id: int, lang: str, edit: tuple[int, int] | None = None) -> None:
         video_url = await self.db.get_setting("connect_video_url", "")
         video_file_id = await self.db.get_setting("connect_video_file_id", "")
         video_kind = await self.db.get_setting("connect_video_kind", "video")
-        text = tr(lang, "connect", app=e(self.settings.app_name))
+        tpl = await self.db.get_template(f"connect_{lang}")
+        if tpl:
+            text = tpl["text"]
+            entities = tpl.get("entities") or []
+        else:
+            text = tr(lang, "connect", app=e(self.settings.app_name))
+            entities = None
         if video_url:
             label = "🎬 Video guide" if lang == "en" else "🎬 Видео-инструкция" if lang == "ru" else "🎬 Відео-інструкція"
             text += f"\n\n{label}: {e(video_url)}"
-        await self._send_or_edit(tg_id, text, back_menu(lang), edit)
+            entities = None  # keep appended URL safe with HTML fallback
+        await self._send_or_edit(tg_id, text, back_menu(lang), edit, entities=entities)
         if video_file_id:
             caption = "🎬 Video guide" if lang == "en" else "🎬 Видео-инструкция" if lang == "ru" else "🎬 Відео-інструкція"
             try:
@@ -565,15 +629,22 @@ class BotHandlers:
             lines.append(f"<b>{e(r.get('chat_title') or '')}</b> — {e(r.get('sender_name') or '')}\n{e(body)[:500]}\n<code>{dt(r.get('created_at'))}</code>")
         await self._send_or_edit(tg_id, "\n\n".join(lines), back_menu(lang), edit)
 
-    async def _send_or_edit(self, tg_id: int, text: str, keyboard: dict[str, Any] | None = None, edit: tuple[int, int] | None = None) -> None:
+    async def _send_or_edit(
+        self,
+        tg_id: int,
+        text: str,
+        keyboard: dict[str, Any] | None = None,
+        edit: tuple[int, int] | None = None,
+        entities: list[dict[str, Any]] | None = None,
+    ) -> None:
         if edit:
             chat_id, message_id = edit
             try:
-                await self.bot.edit_message_text(chat_id, message_id, text, keyboard)
+                await self.bot.edit_message_text(chat_id, message_id, text, keyboard, entities=entities)
                 return
             except Exception:
                 pass
-        await self.bot.send_message(tg_id, text, keyboard)
+        await self.bot.send_message(tg_id, text, keyboard, entities=entities)
 
     async def handle_callback(self, cb: dict[str, Any]) -> None:
         cb_id = cb.get("id")
@@ -618,7 +689,11 @@ class BotHandlers:
         elif data == "connect":
             await self.show_connect(tg_id, lang, edit)
         elif data == "privacy":
-            await self._send_or_edit(tg_id, tr(lang, "privacy"), back_menu(lang), edit)
+            tpl = await self.db.get_template(f"privacy_{lang}")
+            if tpl:
+                await self._send_or_edit(tg_id, tpl["text"], back_menu(lang), edit, entities=tpl.get("entities") or [])
+            else:
+                await self._send_or_edit(tg_id, tr(lang, "privacy"), back_menu(lang), edit)
         elif data == "lang":
             await self._send_or_edit(tg_id, tr(lang, "choose_lang"), lang_keyboard(), edit)
         elif data == "last_deleted":
@@ -985,7 +1060,14 @@ class BotHandlers:
         owner_id = int(conn["owner_tg_id"])
         lang = await self.user_lang(owner_id)
         try:
-            await self.bot.send_message(owner_id, tr(lang, "business_connected" if conn.get("is_enabled") else "business_disabled"), main_menu(lang, await self.db.is_admin(owner_id)))
+            if conn.get("is_enabled"):
+                tpl = await self.db.get_template(f"business_connected_{lang}")
+                if tpl:
+                    await self.bot.send_message(owner_id, tpl["text"], main_menu(lang, await self.db.is_admin(owner_id)), entities=tpl.get("entities") or [])
+                else:
+                    await self.bot.send_message(owner_id, tr(lang, "business_connected"), main_menu(lang, await self.db.is_admin(owner_id)))
+            else:
+                await self.bot.send_message(owner_id, tr(lang, "business_disabled"), main_menu(lang, await self.db.is_admin(owner_id)))
         except Exception as exc:
             print("Business connection notify error:", repr(exc))
 
