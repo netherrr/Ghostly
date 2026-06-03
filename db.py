@@ -254,6 +254,9 @@ class Database:
                 "free_deleted_limit_per_day": self.settings.free_deleted_limit_per_day,
                 "free_retention_hours": self.settings.free_retention_hours,
                 "message_retention_days": self.settings.message_retention_days,
+                "connect_video_url": "",
+                "connect_video_file_id": "",
+                "connect_video_kind": "video",
             }
             for key, value in defaults.items():
                 await con.execute(
@@ -350,6 +353,21 @@ class Database:
             row = await con.fetchrow("SELECT * FROM plans WHERE id=$1", plan_id)
             return dict(row) if row else None
 
+    async def create_plan(self, code: str, price_usd: Decimal | float | str, duration_days: int, name: str | None = None) -> dict[str, Any]:
+        clean_code = code.strip().lower().replace(" ", "_")[:64]
+        title = (name or clean_code).strip()[:120]
+        async with self._pool().acquire() as con:
+            pos = await con.fetchval("SELECT COALESCE(MAX(position), 0) + 10 FROM plans")
+            row = await con.fetchrow(
+                """
+                INSERT INTO plans(code, name_uk, name_ru, name_en, features_uk, features_ru, features_en, price_usd, duration_days, position, is_active)
+                VALUES($1, $2, $2, $2, '', '', '', $3, $4, $5, TRUE)
+                RETURNING *
+                """,
+                clean_code, title, Decimal(str(price_usd)), int(duration_days), int(pos or 100),
+            )
+            return dict(row)
+
     async def update_plan_field(self, plan_id: int, field: str, value: str) -> None:
         allowed = {"name_uk", "name_ru", "name_en", "features_uk", "features_ru", "features_en", "price_usd", "duration_days", "is_active", "position"}
         if field not in allowed:
@@ -417,10 +435,32 @@ class Database:
             row = await con.fetchrow("SELECT p.*, pl.duration_days FROM payments p LEFT JOIN plans pl ON p.plan_id=pl.id WHERE p.id=$1", payment_id)
             return dict(row) if row else None
 
+    async def add_payment_proof(self, payment_id: int, proof: dict[str, Any]) -> dict[str, Any] | None:
+        async with self._pool().acquire() as con:
+            async with con.transaction():
+                row = await con.fetchrow("SELECT * FROM payments WHERE id=$1 FOR UPDATE", payment_id)
+                if not row:
+                    return None
+                data = dict(row)
+                raw = decode_json(data.get("raw"), {}) or {}
+                if not isinstance(raw, dict):
+                    raw = {"raw": raw}
+                raw["proof"] = proof
+                updated = await con.fetchrow(
+                    "UPDATE payments SET raw=$2::jsonb, status=CASE WHEN status='pending' THEN 'waiting_admin' ELSE status END WHERE id=$1 RETURNING *",
+                    payment_id, json.dumps(raw),
+                )
+                return dict(updated) if updated else None
+
     async def mark_payment_paid(self, payment_id: int, admin_id: int | None = None, raw: dict[str, Any] | None = None) -> dict[str, Any] | None:
         async with self._pool().acquire() as con:
             async with con.transaction():
-                row = await con.fetchrow("SELECT p.*, pl.duration_days FROM payments p LEFT JOIN plans pl ON p.plan_id=pl.id WHERE p.id=$1 FOR UPDATE", payment_id)
+                row = await con.fetchrow("""
+                    SELECT p.*, COALESCE((SELECT duration_days FROM plans pl WHERE pl.id=p.plan_id), 30) AS duration_days
+                    FROM payments p
+                    WHERE p.id=$1
+                    FOR UPDATE
+                    """, payment_id)
                 if not row:
                     return None
                 payment = dict(row)
@@ -696,7 +736,7 @@ class Database:
                   (SELECT COUNT(*) FROM cached_messages) AS messages,
                   (SELECT COUNT(*) FROM deleted_events) AS deletions,
                   (SELECT COALESCE(SUM(amount_usd),0) FROM payments WHERE status='paid') AS paid,
-                  (SELECT COUNT(*) FROM payments WHERE status='pending' AND provider <> 'cryptobot') AS pending
+                  (SELECT COUNT(*) FROM payments WHERE status IN ('pending','waiting_admin') AND provider <> 'cryptobot') AS pending
                 """
             )
             return dict(row)
@@ -754,7 +794,7 @@ class Database:
                 FROM payments p
                 LEFT JOIN users u ON u.tg_id=p.user_id
                 LEFT JOIN plans pl ON pl.id=p.plan_id
-                WHERE p.status='pending' AND p.provider <> 'cryptobot'
+                WHERE p.status IN ('pending','waiting_admin') AND p.provider <> 'cryptobot'
                 ORDER BY p.created_at ASC
                 LIMIT $1
                 """,

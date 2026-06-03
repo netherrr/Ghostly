@@ -94,6 +94,27 @@ class BotAPI:
             payload["text"] = text[:200]
         return await self.request("answerCallbackQuery", payload)
 
+
+    async def copy_message(
+        self,
+        chat_id: int | str,
+        from_chat_id: int | str,
+        message_id: int,
+        caption: str | None = None,
+        reply_markup: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "chat_id": chat_id,
+            "from_chat_id": from_chat_id,
+            "message_id": message_id,
+        }
+        if caption is not None:
+            payload["caption"] = caption[:1024]
+            payload["parse_mode"] = "HTML"
+        if reply_markup:
+            payload["reply_markup"] = reply_markup
+        return await self.request("copyMessage", payload)
+
     async def send_cached_media(self, chat_id: int, kind: str, file_id: str, caption: str | None = None) -> dict[str, Any]:
         method_map = {
             "photo": "sendPhoto",

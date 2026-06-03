@@ -102,7 +102,7 @@ def admin_menu(lang: str) -> dict[str, Any]:
 
 
 def admin_plans_keyboard(lang: str, plans: list[dict[str, Any]]) -> dict[str, Any]:
-    rows: list[list[tuple[str, str]]] = []
+    rows: list[list[tuple[str, str]]] = [[("➕ Новий тариф / New plan", "adm_create_plan")]]
     for p in plans:
         status = "✅" if p.get("is_active") else "⛔️"
         rows.append([(f"{status} #{p['id']} {p.get('code')} — ${p.get('price_usd')}", f"admin_plan:{p['id']}")])
@@ -113,6 +113,7 @@ def admin_plans_keyboard(lang: str, plans: list[dict[str, Any]]) -> dict[str, An
 def admin_plan_keyboard(lang: str, plan_id: int, is_active: bool) -> dict[str, Any]:
     return inline([
         [("💵 Ціна / Price", f"adm_set_plan:{plan_id}:price_usd"), ("📆 Дні / Days", f"adm_set_plan:{plan_id}:duration_days")],
+        [("↕️ Позиція", f"adm_set_plan:{plan_id}:position")],
         [("🇺🇦 Назва", f"adm_set_plan:{plan_id}:name_uk"), ("🇷🇺 Название", f"adm_set_plan:{plan_id}:name_ru"), ("🇬🇧 Name", f"adm_set_plan:{plan_id}:name_en")],
         [("🇺🇦 Фічі", f"adm_set_plan:{plan_id}:features_uk"), ("🇷🇺 Фичи", f"adm_set_plan:{plan_id}:features_ru"), ("🇬🇧 Features", f"adm_set_plan:{plan_id}:features_en")],
         [("✅ Увімкнено" if is_active else "⛔️ Вимкнено", f"adm_toggle_plan:{plan_id}")],
@@ -149,6 +150,7 @@ def admin_pending_keyboard(lang: str, payments: list[dict[str, Any]]) -> dict[st
 
 def admin_single_payment_keyboard(lang: str, payment_id: int) -> dict[str, Any]:
     return inline([
+        [("📎 Доказ оплати", f"admin_proof:{payment_id}")],
         [("✅ Підтвердити", f"admin_approve:{payment_id}"), ("❌ Відхилити", f"admin_reject:{payment_id}")],
         [(btn(lang, "back"), "admin_pending")],
     ])
@@ -159,6 +161,8 @@ def admin_settings_keyboard(lang: str) -> dict[str, Any]:
         [("🎁 Free delete limit", "adm_set_setting:free_deleted_limit_per_day")],
         [("🧹 Free retention hours", "adm_set_setting:free_retention_hours")],
         [("🗄 Paid retention days", "adm_set_setting:message_retention_days")],
+        [("🎬 Завантажити відео-інструкцію", "adm_upload_connect_video")],
+        [("🔗 URL відео-інструкції", "adm_set_setting:connect_video_url")],
         [("🧽 Cleanup now", "admin_cleanup")],
         [(btn(lang, "back"), "admin")],
     ])

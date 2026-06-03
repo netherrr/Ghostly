@@ -9,7 +9,7 @@ from typing import Any
 from bot_api import BotAPI
 from config import Settings
 from crypto_pay import CryptoPayClient
-from db import Database, display_name
+from db import Database, display_name, decode_json
 from i18n import btn, tr
 from keyboards import (
     admin_menu,
@@ -79,6 +79,31 @@ def looks_suspicious(text: str) -> bool:
     return has_url and any(w in t for w in risky_words)
 
 
+
+def extract_message_attachment(msg: dict[str, Any]) -> dict[str, Any]:
+    """Return lightweight proof/media metadata for messages sent to the bot."""
+    if msg.get("photo"):
+        photo = msg["photo"][-1]
+        return {"kind": "photo", "file_id": photo.get("file_id"), "caption": msg.get("caption") or ""}
+    for kind in ("video", "document", "animation", "audio", "voice", "video_note", "sticker"):
+        if msg.get(kind):
+            item = msg[kind]
+            return {"kind": kind, "file_id": item.get("file_id"), "caption": msg.get("caption") or item.get("file_name") or ""}
+    if msg.get("text"):
+        return {"kind": "text", "file_id": None, "caption": msg.get("text") or ""}
+    return {"kind": "unknown", "file_id": None, "caption": ""}
+
+
+def proof_summary(proof: dict[str, Any] | None) -> str:
+    if not proof:
+        return "—"
+    kind = proof.get("kind") or "unknown"
+    cap = (proof.get("caption") or "").strip()
+    if cap:
+        return f"{kind}: {cap[:120]}"
+    return str(kind)
+
+
 def state_prompt(lang: str, state: str, payload: dict[str, Any]) -> str:
     if state == "keyword_add":
         return {
@@ -96,6 +121,12 @@ def state_prompt(lang: str, state: str, payload: dict[str, Any]) -> str:
         return f"✏️ Надішли нове значення для тарифу #{e(payload.get('plan_id'))}, поле <code>{e(payload.get('field'))}</code>."
     if state == "admin_set_method":
         return f"✏️ Надішли нове значення для методу <code>{e(payload.get('code'))}</code>, поле <code>{e(payload.get('field'))}</code>."
+    if state == "manual_payment_proof":
+        return "📎 Надішли квитанцію/скрін/фото/відео/файл або текстовий коментар по оплаті. Після цього заявка піде адміну на перевірку."
+    if state == "admin_upload_connect_video":
+        return "🎬 Надішли відео-інструкцію файлом/відео в цей чат. Я збережу file_id і буду показувати її користувачам у розділі «Як підключити»."
+    if state == "admin_create_plan":
+        return "➕ Надішли новий тариф у форматі:\n<code>code price days Назва тарифу</code>\n\nПриклад:\n<code>vip_week 0.99 7 VIP 7 днів</code>"
     return "Надішли значення або натисни Скасувати."
 
 
@@ -141,8 +172,18 @@ class BotHandlers:
             await self.db.clear_state(tg_id)
 
         state = await self.db.get_state(tg_id)
-        if state and text and not text.startswith("/"):
-            await self.handle_state_input(tg_id, lang, text, state, is_admin)
+        if state and not text.startswith("/"):
+            state_name = str(state.get("state") or "")
+            if state_name == "manual_payment_proof":
+                await self.handle_payment_proof_message(tg_id, lang, msg, state, is_admin)
+                return
+            if state_name == "admin_upload_connect_video" and is_admin:
+                await self.handle_admin_upload_connect_video(tg_id, lang, msg, state)
+                return
+            if text:
+                await self.handle_state_input(tg_id, lang, text, state, is_admin)
+                return
+            await self.bot.send_message(tg_id, state_prompt(lang, state_name, state.get("payload") or {}), cancel_keyboard(lang, "admin" if is_admin else "menu"))
             return
 
         if text.startswith("/start"):
@@ -194,6 +235,20 @@ class BotHandlers:
             if not is_admin:
                 await self.db.clear_state(tg_id)
                 await self.bot.send_message(tg_id, tr(lang, "not_admin"))
+                return
+
+            if state == "admin_create_plan":
+                parts = text.split(maxsplit=3)
+                if len(parts) < 3:
+                    raise ValueError("Format: code price days Назва")
+                code = parts[0]
+                price = parts[1]
+                days = int(parts[2])
+                name = parts[3] if len(parts) > 3 else code
+                plan = await self.db.create_plan(code, price, days, name)
+                await self.db.clear_state(tg_id)
+                await self.bot.send_message(tg_id, f"✅ Створено тариф #{plan['id']} <code>{e(plan['code'])}</code>.")
+                await self.show_admin_plan(tg_id, lang, int(plan["id"]))
                 return
 
             if state == "admin_set_plan":
@@ -251,6 +306,22 @@ class BotHandlers:
 
     async def show_start(self, tg_id: int, lang: str, is_admin: bool) -> None:
         await self.bot.send_message(tg_id, tr(lang, "start", app=e(self.settings.app_name)), main_menu(lang, is_admin))
+
+    async def show_connect(self, tg_id: int, lang: str, edit: tuple[int, int] | None = None) -> None:
+        video_url = await self.db.get_setting("connect_video_url", "")
+        video_file_id = await self.db.get_setting("connect_video_file_id", "")
+        video_kind = await self.db.get_setting("connect_video_kind", "video")
+        text = tr(lang, "connect")
+        if video_url:
+            label = "🎬 Video guide" if lang == "en" else "🎬 Видео-инструкция" if lang == "ru" else "🎬 Відео-інструкція"
+            text += f"\n\n{label}: {e(video_url)}"
+        await self._send_or_edit(tg_id, text, back_menu(lang), edit)
+        if video_file_id:
+            caption = "🎬 Video guide" if lang == "en" else "🎬 Видео-инструкция" if lang == "ru" else "🎬 Відео-інструкція"
+            try:
+                await self.bot.send_cached_media(tg_id, str(video_kind), str(video_file_id), caption)
+            except Exception as exc:
+                print("Send connect guide media error:", repr(exc))
 
     async def show_status(self, tg_id: int, lang: str, edit: tuple[int, int] | None = None) -> None:
         user = await self.db.get_user(tg_id)
@@ -363,7 +434,7 @@ class BotHandlers:
         elif data == "plans":
             await self.show_plans(tg_id, lang, edit)
         elif data == "connect":
-            await self._send_or_edit(tg_id, tr(lang, "connect"), back_menu(lang), edit)
+            await self.show_connect(tg_id, lang, edit)
         elif data == "privacy":
             await self._send_or_edit(tg_id, tr(lang, "privacy"), back_menu(lang), edit)
         elif data == "lang":
@@ -462,22 +533,64 @@ class BotHandlers:
         if not payment or int(payment["user_id"]) != tg_id:
             await self.bot.send_message(tg_id, tr(lang, "payment_error"))
             return
-        await self.bot.send_message(tg_id, tr(lang, "paid_wait_admin"), main_menu(lang, await self.db.is_admin(tg_id)))
-        user = await self.db.get_user(tg_id)
+        await self.db.set_state(tg_id, "manual_payment_proof", {"payment_id": payment_id})
+        await self.bot.send_message(tg_id, state_prompt(lang, "manual_payment_proof", {"payment_id": payment_id}), cancel_keyboard(lang, "plans"))
+
+    async def notify_admin_payment(self, payment_id: int) -> None:
+        payment = await self.db.get_payment(payment_id)
+        if not payment:
+            return
+        user_id = int(payment["user_id"]) if payment.get("user_id") else 0
+        user = await self.db.get_user(user_id) if user_id else None
         plan = await self.db.get_plan(int(payment["plan_id"])) if payment.get("plan_id") else None
+        raw = decode_json(payment.get("raw"), {}) or {}
+        proof = raw.get("proof") if isinstance(raw, dict) else None
         admin_text = (
             f"💳 <b>Manual payment request</b>\n\n"
             f"Payment ID: <code>{payment_id}</code>\n"
-            f"User: <code>{tg_id}</code> @{e((user or {}).get('username') or '')}\n"
+            f"User: <code>{user_id}</code> @{e((user or {}).get('username') or '')}\n"
             f"Provider: <b>{e(payment['provider'])}</b>\n"
             f"Plan: <b>{e(plan_name(plan, 'en'))}</b>\n"
-            f"Amount: <b>${e(payment['amount_usd'])}</b>"
+            f"Amount: <b>${e(payment['amount_usd'])}</b>\n"
+            f"Proof: <b>{e(proof_summary(proof))}</b>"
         )
         for admin_id in self.settings.admin_ids:
             try:
                 await self.bot.send_message(admin_id, admin_text, admin_payment_keyboard(payment_id))
+                if proof and proof.get("source_chat_id") and proof.get("source_message_id"):
+                    await self.bot.copy_message(admin_id, int(proof["source_chat_id"]), int(proof["source_message_id"]))
             except Exception as exc:
                 print("Notify admin error", admin_id, repr(exc))
+
+    async def handle_payment_proof_message(self, tg_id: int, lang: str, msg: dict[str, Any], state_row: dict[str, Any], is_admin: bool) -> None:
+        payload = state_row.get("payload") or {}
+        payment_id = int(payload.get("payment_id") or 0)
+        payment = await self.db.get_payment(payment_id)
+        if not payment or int(payment.get("user_id") or 0) != tg_id:
+            await self.db.clear_state(tg_id)
+            await self.bot.send_message(tg_id, tr(lang, "payment_error"), main_menu(lang, is_admin))
+            return
+        proof = extract_message_attachment(msg)
+        proof.update({
+            "source_chat_id": int(msg.get("chat", {}).get("id", tg_id)),
+            "source_message_id": int(msg.get("message_id")),
+            "from_user_id": tg_id,
+            "date": msg.get("date"),
+        })
+        await self.db.add_payment_proof(payment_id, proof)
+        await self.db.clear_state(tg_id)
+        await self.bot.send_message(tg_id, tr(lang, "paid_wait_admin"), main_menu(lang, is_admin))
+        await self.notify_admin_payment(payment_id)
+
+    async def handle_admin_upload_connect_video(self, tg_id: int, lang: str, msg: dict[str, Any], state_row: dict[str, Any]) -> None:
+        proof = extract_message_attachment(msg)
+        if not proof.get("file_id") or proof.get("kind") not in {"video", "document", "animation", "photo"}:
+            await self.bot.send_message(tg_id, "❌ Надішли саме відео/файл/анімацію або фото з інструкцією.", cancel_keyboard(lang, "admin_settings"))
+            return
+        await self.db.set_setting("connect_video_file_id", proof["file_id"])
+        await self.db.set_setting("connect_video_kind", proof["kind"])
+        await self.db.clear_state(tg_id)
+        await self.bot.send_message(tg_id, f"✅ Відео/медіа інструкцію збережено. Тип: <code>{e(proof['kind'])}</code>", admin_settings_keyboard(lang))
 
     async def admin_approve_callback(self, admin_id: int, lang: str, payment_id: int, approved: bool) -> None:
         if not await self.db.is_admin(admin_id):
@@ -508,8 +621,13 @@ class BotHandlers:
             await self.show_admin_pending(tg_id, lang, edit)
         elif data.startswith("admin_payment:"):
             await self.show_admin_payment(tg_id, lang, int(data.split(":", 1)[1]), edit)
+        elif data.startswith("admin_proof:"):
+            await self.send_payment_proof_to_admin(tg_id, lang, int(data.split(":", 1)[1]))
         elif data == "admin_plans":
             await self.show_admin_plans(tg_id, lang, edit)
+        elif data == "adm_create_plan":
+            await self.db.set_state(tg_id, "admin_create_plan", {})
+            await self._send_or_edit(tg_id, state_prompt(lang, "admin_create_plan", {}), cancel_keyboard(lang, "admin_plans"), edit)
         elif data.startswith("admin_plan:"):
             await self.show_admin_plan(tg_id, lang, int(data.split(":", 1)[1]), edit)
         elif data.startswith("adm_set_plan:"):
@@ -551,11 +669,31 @@ class BotHandlers:
             payload = {"key": key}
             await self.db.set_state(tg_id, "admin_set_setting", payload)
             await self._send_or_edit(tg_id, state_prompt(lang, "admin_set_setting", payload), cancel_keyboard(lang, "admin_settings"), edit)
+        elif data == "adm_upload_connect_video":
+            await self.db.set_state(tg_id, "admin_upload_connect_video", {})
+            await self._send_or_edit(tg_id, state_prompt(lang, "admin_upload_connect_video", {}), cancel_keyboard(lang, "admin_settings"), edit)
         elif data == "admin_cleanup":
             deleted = await self.db.cleanup_old_messages()
             await self._send_or_edit(tg_id, f"🧹 Cleanup done. Deleted rows: <b>{deleted}</b>", admin_settings_keyboard(lang), edit)
         elif data == "admin_users":
             await self.show_admin_users(tg_id, lang, edit)
+
+    async def send_payment_proof_to_admin(self, admin_id: int, lang: str, payment_id: int) -> None:
+        payment = await self.db.get_payment(payment_id)
+        if not payment:
+            await self.bot.send_message(admin_id, "Заявку не знайдено.")
+            return
+        raw = decode_json(payment.get("raw"), {}) or {}
+        proof = raw.get("proof") if isinstance(raw, dict) else None
+        if not proof:
+            await self.bot.send_message(admin_id, "📎 Доказ оплати ще не додано.")
+            return
+        await self.bot.send_message(admin_id, f"📎 Доказ для заявки <code>#{payment_id}</code>: <b>{e(proof_summary(proof))}</b>")
+        if proof.get("source_chat_id") and proof.get("source_message_id"):
+            try:
+                await self.bot.copy_message(admin_id, int(proof["source_chat_id"]), int(proof["source_message_id"]))
+            except Exception as exc:
+                await self.bot.send_message(admin_id, f"Не вийшло скопіювати доказ: <code>{e(repr(exc))}</code>")
 
     async def show_admin_stats(self, tg_id: int, lang: str, edit: tuple[int, int] | None = None) -> None:
         s = await self.db.stats()
@@ -618,6 +756,8 @@ class BotHandlers:
             return
         user = await self.db.get_user(int(p["user_id"])) if p.get("user_id") else None
         plan = await self.db.get_plan(int(p["plan_id"])) if p.get("plan_id") else None
+        p_raw = decode_json(p.get("raw"), {}) or {}
+        p_proof = p_raw.get("proof") if isinstance(p_raw, dict) else None
         text = (
             f"💳 <b>Заявка #{p['id']}</b>\n\n"
             f"Статус: <b>{e(p['status'])}</b>\n"
@@ -625,7 +765,8 @@ class BotHandlers:
             f"Тариф: <b>{e(plan_name(plan, 'uk'))}</b>\n"
             f"Метод: <b>{e(p['provider'])}</b>\n"
             f"Сума: <b>${e(p['amount_usd'])}</b>\n"
-            f"Створено: <code>{dt(p.get('created_at'))}</code>"
+            f"Створено: <code>{dt(p.get('created_at'))}</code>\n"
+            f"Доказ: <b>{e(proof_summary(p_proof))}</b>"
         )
         await self._send_or_edit(tg_id, text, admin_single_payment_keyboard(lang, payment_id), edit)
 
@@ -633,11 +774,15 @@ class BotHandlers:
         free_limit = await self.db.get_setting("free_deleted_limit_per_day", self.settings.free_deleted_limit_per_day)
         free_hours = await self.db.get_setting("free_retention_hours", self.settings.free_retention_hours)
         paid_days = await self.db.get_setting("message_retention_days", self.settings.message_retention_days)
+        video_url = await self.db.get_setting("connect_video_url", "")
+        video_file_id = await self.db.get_setting("connect_video_file_id", "")
         text = (
             "⚙️ <b>Налаштування</b>\n\n"
             f"🎁 Free deleted/day: <b>{e(free_limit)}</b>\n"
             f"🧹 Free retention hours: <b>{e(free_hours)}</b>\n"
-            f"🗄 Paid retention days: <b>{e(paid_days)}</b>\n\n"
+            f"🗄 Paid retention days: <b>{e(paid_days)}</b>\n"
+            f"🎬 Guide video file: <b>{'✅' if video_file_id else '—'}</b>\n"
+            f"🔗 Guide video URL: <b>{e(video_url or '—')}</b>\n\n"
             "Натисни потрібну кнопку і надішли нове значення."
         )
         await self._send_or_edit(tg_id, text, admin_settings_keyboard(lang), edit)

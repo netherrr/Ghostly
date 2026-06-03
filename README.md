@@ -161,3 +161,17 @@ uvicorn main:app --reload --port 8080
 ```
 
 Для Telegram webhook локально потрібен публічний HTTPS URL, наприклад через ngrok/cloudflared.
+
+## Update notes: payments proof + flexible admin
+
+This build adds:
+
+- manual payment proof flow: after pressing “I paid”, the user must send a receipt/screenshot/video/file/text;
+- admin receives the manual payment request plus copied proof;
+- admin payment card has a “Proof” button;
+- fixed PostgreSQL `FOR UPDATE` approval bug;
+- admin can create a new plan from the plan constructor;
+- admin can edit plan price, duration, position, names, features and active status;
+- admin can upload a guide video/media for “How to connect”;
+- admin can set a guide video URL in settings.
+
