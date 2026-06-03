@@ -311,7 +311,7 @@ class BotHandlers:
         video_url = await self.db.get_setting("connect_video_url", "")
         video_file_id = await self.db.get_setting("connect_video_file_id", "")
         video_kind = await self.db.get_setting("connect_video_kind", "video")
-        text = tr(lang, "connect")
+        text = tr(lang, "connect", app=e(self.settings.app_name))
         if video_url:
             label = "🎬 Video guide" if lang == "en" else "🎬 Видео-инструкция" if lang == "ru" else "🎬 Відео-інструкція"
             text += f"\n\n{label}: {e(video_url)}"
@@ -843,12 +843,14 @@ class BotHandlers:
         lang = await self.user_lang(owner_id)
         old_text = (old.get("text") or old.get("caption")) if old else "—"
         new_text = new.get("text") or new.get("caption") or "—"
+        before_label = "Before" if lang == "en" else "Было" if lang == "ru" else "Було"
+        after_label = "After" if lang == "en" else "Стало" if lang == "ru" else "Стало"
         text = (
             f"{tr(lang, 'edited_title')}\n\n"
-            f"<b>{tr(lang, 'chat')}:</b> {e(new.get('chat_title') or new.get('chat_id'))}\n"
-            f"<b>{tr(lang, 'from')}:</b> {e(new.get('sender_name') or new.get('sender_id'))}\n\n"
-            f"<b>Before:</b>\n{e(old_text)[:1500]}\n\n"
-            f"<b>After:</b>\n{e(new_text)[:1500]}"
+            f"💬 <b>{tr(lang, 'chat')}:</b> {e(new.get('chat_title') or new.get('chat_id'))}\n"
+            f"👤 <b>{tr(lang, 'from')}:</b> {e(new.get('sender_name') or new.get('sender_id'))}\n\n"
+            f"⬅️ <b>{before_label}:</b>\n{e(old_text)[:1500]}\n\n"
+            f"➡️ <b>{after_label}:</b>\n{e(new_text)[:1500]}"
         )
         await self.safe_send(owner_id, text)
 
@@ -885,14 +887,25 @@ class BotHandlers:
         kind = cached.get("content_type") or "unknown"
         body = cached.get("text") or cached.get("caption") or ""
         label = tr(lang, "text") if cached.get("text") else tr(lang, "caption")
+        when_label = "Time" if lang == "en" else "Время" if lang == "ru" else "Час"
+        chat_label = tr(lang, "chat")
+        from_label = tr(lang, "from")
+        saved_label = "Saved copy" if lang == "en" else "Сохранённая копия" if lang == "ru" else "Збережена копія"
+        service_note = (
+            "This copy was saved before the message was deleted."
+            if lang == "en"
+            else "Эта копия была сохранена до удаления сообщения."
+            if lang == "ru"
+            else "Цю копію було збережено до видалення повідомлення."
+        )
         text = (
             f"{tr(lang, 'deleted_title')}\n\n"
-            f"<b>{tr(lang, 'chat')}:</b> {e(cached.get('chat_title') or cached.get('chat_id'))}\n"
-            f"<b>{tr(lang, 'from')}:</b> {e(cached.get('sender_name') or cached.get('sender_id'))}\n"
-            f"<b>ID:</b> <code>{e(cached.get('message_id'))}</code>\n"
+            f"💬 <b>{chat_label}:</b> {e(cached.get('chat_title') or cached.get('chat_id'))}\n"
+            f"👤 <b>{from_label}:</b> {e(cached.get('sender_name') or cached.get('sender_id'))}\n"
+            f"🕒 <b>{when_label}:</b> <code>{dt(cached.get('created_at'))}</code>\n"
         )
         if body:
-            text += f"\n<b>{label}:</b>\n{e(body)[:3000]}"
+            text += f"\n🧾 <b>{saved_label}:</b>\n{e(body)[:3000]}\n\n<i>{e(service_note)}</i>"
         elif cached.get("file_id"):
             text += "\n" + tr(lang, "media_saved", kind=e(kind))
         else:
