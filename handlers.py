@@ -315,7 +315,16 @@ DYNAMIC_TEMPLATE_SPECS = {
 def template_base(key: str | None) -> str:
     if not key:
         return ""
-    return str(key).rsplit("_", 1)[0]
+    raw = str(key)
+    for suffix in ("_uk", "_ru", "_en"):
+        if raw.endswith(suffix):
+            raw = raw[: -len(suffix)]
+            break
+    # payment_manual can be method-specific, for example:
+    # payment_manual_ua_card_uk / payment_manual_trc20_uk.
+    if raw.startswith("payment_manual_"):
+        return "payment_manual"
+    return raw
 
 
 def is_dynamic_template_key(key: str | None) -> bool:
@@ -488,6 +497,26 @@ def strip_accidental_edit_prefix(text: str, entities: list[dict[str, Any]]) -> t
     return text[idx:], clean_entities_for_edit(entities, skip)
 
 
+def iter_callback_data(markup: dict[str, Any] | None) -> list[str]:
+    result: list[str] = []
+    if not isinstance(markup, dict):
+        return result
+    for row in markup.get("inline_keyboard") or []:
+        if not isinstance(row, list):
+            continue
+        for btn_obj in row:
+            if isinstance(btn_obj, dict) and btn_obj.get("callback_data"):
+                result.append(str(btn_obj.get("callback_data")))
+    return result
+
+
+def first_callback_with_prefix(markup: dict[str, Any] | None, prefix: str) -> str | None:
+    for data in iter_callback_data(markup):
+        if data.startswith(prefix):
+            return data
+    return None
+
+
 def detect_template_from_target(target: dict[str, Any] | None, lang: str) -> str | None:
     """Auto-detect which reusable template an edited bot message belongs to.
 
@@ -498,6 +527,21 @@ def detect_template_from_target(target: dict[str, Any] | None, lang: str) -> str
         return None
     text = str(target.get("text") or target.get("caption") or "")
     low = text.lower()
+    callbacks = iter_callback_data(target.get("reply_markup"))
+
+    # Callback buttons are the most reliable way to understand the screen.
+    # This lets /edit work even when the message text was heavily customized
+    # with Premium emoji and no longer contains the old keywords.
+    if any(cb.startswith("manual_paid:") for cb in callbacks):
+        return f"payment_manual_{lang}"
+    if any(cb.startswith("pay:") for cb in callbacks):
+        return f"choose_payment_{lang}"
+    if any(cb.startswith("buy:") for cb in callbacks):
+        return f"plans_{lang}"
+    if any(cb.startswith("setlang:") for cb in callbacks):
+        return f"choose_lang_{lang}"
+    if any(cb in {"kw_add", "kw_delete_menu"} or cb.startswith("kw_del:") for cb in callbacks):
+        return f"keywords_{lang}"
 
     # Static/specific screens first. Privacy and connection instructions can
     # contain words like "Business-підключення", so they must not be mistaken
@@ -716,6 +760,25 @@ class BotHandlers:
         else:
             await self.show_menu_screen(tg_id, lang, is_admin)
 
+    async def resolve_edit_template_key(self, target: dict[str, Any], lang: str) -> str | None:
+        key = detect_template_from_target(target, lang)
+
+        # Manual payment screens must be editable per payment method.
+        # Otherwise editing TON would accidentally change card/TRC20/BEP20 too.
+        if key == f"payment_manual_{lang}":
+            cb = first_callback_with_prefix(target.get("reply_markup"), "manual_paid:")
+            if cb:
+                try:
+                    payment_id = int(cb.split(":", 1)[1])
+                    payment = await self.db.get_payment(payment_id)
+                    provider = str((payment or {}).get("provider") or "").strip()
+                    if provider and provider != "cryptobot":
+                        return f"payment_manual_{provider}_{lang}"
+                except Exception:
+                    pass
+        return key
+
+
     async def handle_edit_command(self, tg_id: int, lang: str, msg: dict[str, Any]) -> None:
         if not await self.db.is_admin(tg_id):
             await self.bot.send_message(tg_id, tr(lang, "not_admin"))
@@ -741,7 +804,7 @@ class BotHandlers:
 
         new_text, entities, _ = command_payload_from_message(msg)
         template_key, new_text, entities = parse_template_prefix(new_text, entities, lang)
-        auto_template_key = detect_template_from_target(target, lang)
+        auto_template_key = await self.resolve_edit_template_key(target, lang)
         if not template_key:
             template_key = auto_template_key
         payload = {
@@ -768,8 +831,8 @@ class BotHandlers:
                     editable = str((current_tpl or {}).get("text") or dynamic_template_default(base, lang))
                     protected = " ".join(["{" + v + "}" for v in dynamic_required_vars(base)])
                     extra += (
-                        "\n\n🔒 <b>Це динамічний екран.</b> Я підставляю живі дані користувача через змінні."
-                        "\nНе видаляй ці змінні, інакше я не збережу шаблон:"
+                        "\n\n🔒 <b>Це динамічний екран.</b> Змінні нижче підставляють живі дані."
+                        "\nМожеш залишити їх — тоді дані будуть оновлюватись. Можеш прибрати — тоді екран стане статичним."
                         f"\n<code>{e(protected)}</code>"
                     )
                 if editable:
@@ -816,33 +879,11 @@ class BotHandlers:
             await self.bot.send_message(tg_id, "❌ Не знайшов повідомлення для редагування. Спробуй ще раз: reply → /edit")
             return
 
-        # Dynamic screens must keep their protected variables so every user sees
-        # their own live values. Media is allowed, but text cannot be empty for
-        # dynamic screens because otherwise the live data disappears.
-        if template_key and is_dynamic_template_key(template_key):
-            base = template_base(template_key)
-            if not (text or "").strip():
-                current_tpl = await self.db.get_template(str(template_key))
-                editable = str((current_tpl or {}).get("text") or dynamic_template_default(base, lang))
-                await self.bot.send_message(
-                    tg_id,
-                    "⚠️ <b>Це динамічний екран.</b> Тут не можна залишити тільки медіа, бо зникнуть живі дані користувача.\n\n"
-                    "Скопіюй шаблон нижче, зміни тільки оформлення/текст, але залиш змінні у фігурних дужках:"
-                    f"\n<pre>{e(editable)}</pre>",
-                )
-                return
-            missing = missing_dynamic_vars(base, text)
-            if missing:
-                protected = " ".join(["{" + v + "}" for v in dynamic_required_vars(base)])
-                await self.bot.send_message(
-                    tg_id,
-                    "⚠️ <b>Я не зберіг шаблон, бо ти випадково прибрав технічні змінні.</b>\n\n"
-                    f"Не можна видаляти: <code>{e(', '.join('{' + v + '}' for v in missing))}</code>\n\n"
-                    "Повний список змінних для цього екрана:"
-                    f"\n<code>{e(protected)}</code>\n\n"
-                    "Встав їх назад і надішли текст ще раз.",
-                )
-                return
+        # Dynamic screens can now be edited visually too. If the admin keeps
+        # variables like {plan_name}, they remain live. If he removes them, the
+        # screen becomes a static custom design. This is intentional: the admin
+        # asked for simple reply -> /edit -> send new Premium emoji text without
+        # needing the separate admin panel.
 
         try:
             # If admin sends media, Telegram cannot reliably convert an existing text
@@ -1495,7 +1536,7 @@ class BotHandlers:
             "payment_amount_lines": payment_amount_lines(amount, amount_uah, method_code, lang),
             "instructions": method_instructions(method, lang),
         }
-        tpl = await self.db.get_template(f"payment_manual_{lang}")
+        tpl = await self.db.get_template(f"payment_manual_{method_code}_{lang}") or await self.db.get_template(f"payment_manual_{lang}")
         if tpl:
             rendered, ents = render_dynamic_template(str(tpl.get("text") or ""), tpl.get("entities") or [], values)
             media = tpl.get("media")
