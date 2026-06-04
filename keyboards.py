@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Any
+from urllib.parse import quote
 
 from i18n import btn
 
@@ -95,8 +96,16 @@ def cancel_keyboard(lang: str, to: str = "menu") -> dict[str, Any]:
 
 def referral_keyboard(lang: str, bot_username: str, user_id: int) -> dict[str, Any]:
     link = f"https://t.me/{bot_username}?start=ref_{user_id}"
-    share_text = "Invite friends to Ghostly Guard and earn 30% from their purchases." if lang == "en" else "Приглашай друзей в Ghostly Guard и получай 30% от их покупок." if lang == "ru" else "Запрошуй друзів у Ghostly Guard і отримуй 30% з їхніх покупок."
-    share_url = "https://t.me/share/url?url=" + link + "&text=" + share_text.replace(" ", "%20")
+    share_text = (
+        "Invite friends to Ghostly Guard and earn 30% from their purchases."
+        if lang == "en"
+        else "Приглашай друзей в Ghostly Guard и получай 30% от их покупок."
+        if lang == "ru"
+        else "Запрошуй друзів у Ghostly Guard і отримуй 30% з їхніх покупок."
+    )
+    # Telegram share URL must be fully URL-encoded. Otherwise Cyrillic text and
+    # symbols like % may be sent to chats as ugly %20/%D0... garbage.
+    share_url = "https://t.me/share/url?url=" + quote(link, safe="") + "&text=" + quote(share_text, safe="")
     return {
         "inline_keyboard": [
             [{"text": "📤 Share link" if lang == "en" else "📤 Поделиться ссылкой" if lang == "ru" else "📤 Поділитися посиланням", "url": share_url}],

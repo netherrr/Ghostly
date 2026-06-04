@@ -240,6 +240,16 @@ TEMPLATE_ALIASES = {
     "manual": "payment_manual",
     "ручна": "payment_manual",
     "ручная": "payment_manual",
+    "keyword_prompt": "prompt_keyword_add",
+    "keyword_add": "prompt_keyword_add",
+    "prompt_keyword": "prompt_keyword_add",
+    "кеворд": "prompt_keyword_add",
+    "ключове": "prompt_keyword_add",
+    "proof_prompt": "prompt_manual_payment_proof",
+    "payment_proof": "prompt_manual_payment_proof",
+    "proof": "prompt_manual_payment_proof",
+    "квитанція": "prompt_manual_payment_proof",
+    "квитанция": "prompt_manual_payment_proof",
 }
 
 DYNAMIC_TEMPLATE_SPECS = {
@@ -507,7 +517,13 @@ def detect_template_from_target(target: dict[str, Any] | None, lang: str) -> str
     # words like "Business", otherwise privacy/connect screens get misdetected.
     if any(x in low for x in ["статус захисту", "статус защиты", "protection status", "збережено нових", "сохранено новых", "new messages saved", "видалених знайдено", "удалённых найдено", "deleted found"]):
         return f"status_{lang}"
-    if any(x in low for x in ["тарифи ghostly", "тарифы ghostly", "ghostly guard plans", "plan:", "тариф:", "тарифи", "тарифы"]):
+    # Payment screens must be detected before plans because they also contain
+    # generic words like "Тариф" and plan names.
+    if any(x in low for x in ["ручна оплата", "ручная оплата", "manual payment", "до сплати", "до оплаты", "сума в грн", "сумма в грн", "usdt trc20", "usdt bep20", "binance id", "картка:", "карта:", "отримувач:", "получатель:", "я оплатив", "i paid"]):
+        return f"payment_manual_{lang}"
+    if any(x in low for x in ["оплата тарифу", "оплата тарифа", "plan payment", "обери спосіб оплати", "выбери способ оплаты", "choose payment method"]):
+        return f"choose_payment_{lang}"
+    if any(x in low for x in ["тарифи ghostly", "тарифы ghostly", "ghostly guard plans", "обери тариф", "выбери тариф", "choose a plan", "choose plan", "free-режим", "free режим"]):
         return f"plans_{lang}"
     if any(x in low for x in ["ключовими словами", "ключевым словам", "keyword alerts", "keywords:", "слів:", "слов:"]):
         return f"keywords_{lang}"
@@ -515,14 +531,10 @@ def detect_template_from_target(target: dict[str, Any] | None, lang: str) -> str
         return f"deleted_{lang}"
     if any(x in low for x in ["реферальна система", "реферальная система", "referral system", "referral_link", "твоя ссылка", "твоє посилання", "your link", "запрошуй друзів", "приглашай друзей"]):
         return f"referrals_{lang}"
-    if any(x in low for x in ["оплата тарифу", "оплата тарифа", "plan payment", "обери спосіб оплати", "выбери способ оплаты", "choose payment method"]):
-        return f"choose_payment_{lang}"
     if any(x in low for x in ["надішли ключове слово", "отправь ключевое слово", "send the keyword", "ключове слово або фразу", "keyword or phrase"]):
         return f"prompt_keyword_add_{lang}"
     if any(x in low for x in ["надішли квитанцію", "отправь квитанцию", "send a receipt", "скрін/квитанцію", "receipt/screenshot"]):
         return f"prompt_manual_payment_proof_{lang}"
-    if any(x in low for x in ["ручна оплата", "ручная оплата", "manual payment", "я оплатив", "i paid", "квитанцію", "квитанцию"]):
-        return f"payment_manual_{lang}"
     if any(x in low for x in ["ghostly", "що я вмію", "что я умею", "what i can", "особистий захист", "личный защит", "telegram-чат"]):
         return f"start_{lang}"
     return None
@@ -718,7 +730,7 @@ class BotHandlers:
                 "1. Відповідай на потрібне повідомлення командою <code>/edit</code>.\n"
                 "2. Потім надішли новий текст або фото/відео/GIF/файл з підписом.\n\n"
                 "Швидкий варіант для тексту: <code>/edit Новий текст</code>\n"
-                "Я сам визначу шаблон: start / connect / privacy / business.",
+                "Я сам визначу шаблон: start / connect / privacy / business / payment / referrals.",
             )
             return
 
@@ -747,6 +759,10 @@ class BotHandlers:
                 extra = f"\n\n🧩 <b>Я визначив цей екран як шаблон:</b> <code>{e(template_key)}</code>. Новий контент збережу назавжди."
                 current_tpl = await self.db.get_template(template_key)
                 editable = str((current_tpl or {}).get("text") or target.get("text") or target.get("caption") or "")
+                if not editable and str(template_key).startswith("prompt_keyword_add_"):
+                    editable = state_prompt(lang, "keyword_add", {})
+                if not editable and str(template_key).startswith("prompt_manual_payment_proof_"):
+                    editable = state_prompt(lang, "manual_payment_proof", {})
                 if is_dynamic_template_key(template_key):
                     base = template_base(template_key)
                     editable = str((current_tpl or {}).get("text") or dynamic_template_default(base, lang))
