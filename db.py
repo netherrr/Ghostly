@@ -542,6 +542,153 @@ After payment, press “I paid” and send a screenshot, receipt, or transaction
                     """
                 )
 
+
+            # One-time cleanup after owner feedback: simplify manual payment text
+            # and remove repeated explanations. This intentionally overwrites the
+            # previous prefilled requisites/templates once, then protects future edits.
+            simplified = await con.fetchval("SELECT value FROM settings WHERE key='requisites_simplified_v2'")
+            if not simplified:
+                await con.execute(
+                    """
+                    INSERT INTO settings(key, value) VALUES('uah_rate', '44'::jsonb)
+                    ON CONFLICT(key) DO UPDATE SET value='44'::jsonb, updated_at=NOW()
+                    """
+                )
+                await con.execute(
+                    """
+                    UPDATE payment_methods SET
+                        instructions_uk=$2,
+                        instructions_ru=$3,
+                        instructions_en=$4,
+                        details=$5::jsonb,
+                        updated_at=NOW()
+                    WHERE code=$1
+                    """,
+                    "ua_card",
+                    """💳 <b>Картка:</b>
+<code>4441114419666357</code>
+
+👤 <b>Отримувач:</b>
+<code>Назар М</code>""",
+                    """💳 <b>Карта:</b>
+<code>4441114419666357</code>
+
+👤 <b>Получатель:</b>
+<code>Назар М</code>""",
+                    """💳 <b>Card:</b>
+<code>4441114419666357</code>
+
+👤 <b>Recipient:</b>
+<code>Nazar M</code>""",
+                    json.dumps({"card": "4441114419666357", "recipient": "Назар М"}),
+                )
+                await con.execute(
+                    """
+                    UPDATE payment_methods SET instructions_uk=$2, instructions_ru=$3, instructions_en=$4, details=$5::jsonb, updated_at=NOW()
+                    WHERE code=$1
+                    """,
+                    "binance_id",
+                    """🚗 <b>Binance ID:</b>
+<code>482957043</code>
+
+Nickname:
+<code>travyx</code>""",
+                    """🚗 <b>Binance ID:</b>
+<code>482957043</code>
+
+Nickname:
+<code>travyx</code>""",
+                    """🚗 <b>Binance ID:</b>
+<code>482957043</code>
+
+Nickname:
+<code>travyx</code>""",
+                    json.dumps({"binance_id": "482957043", "nickname": "travyx"}),
+                )
+                await con.execute(
+                    """
+                    UPDATE payment_methods SET instructions_uk=$2, instructions_ru=$3, instructions_en=$4, details=$5::jsonb, updated_at=NOW()
+                    WHERE code=$1
+                    """,
+                    "usdt_trc20",
+                    """🪙 <b>USDT TRC20</b>
+<code>TW2XKnkY6MdgsJxXZFXqFoucWkgxEqr7Ei</code>
+
+Перевір мережу перед оплатою.""",
+                    """🪙 <b>USDT TRC20</b>
+<code>TW2XKnkY6MdgsJxXZFXqFoucWkgxEqr7Ei</code>
+
+Проверь сеть перед оплатой.""",
+                    """🪙 <b>USDT TRC20</b>
+<code>TW2XKnkY6MdgsJxXZFXqFoucWkgxEqr7Ei</code>
+
+Check the network before sending.""",
+                    json.dumps({"network": "TRC20", "address": "TW2XKnkY6MdgsJxXZFXqFoucWkgxEqr7Ei"}),
+                )
+                await con.execute(
+                    """
+                    UPDATE payment_methods SET instructions_uk=$2, instructions_ru=$3, instructions_en=$4, details=$5::jsonb, updated_at=NOW()
+                    WHERE code=$1
+                    """,
+                    "usdt_bep20",
+                    """🪙 <b>USDT BEP20</b>
+<code>0x2d523071538cd8a417858d78775e966c9171ffc8</code>
+
+Перевір мережу перед оплатою.""",
+                    """🪙 <b>USDT BEP20</b>
+<code>0x2d523071538cd8a417858d78775e966c9171ffc8</code>
+
+Проверь сеть перед оплатой.""",
+                    """🪙 <b>USDT BEP20</b>
+<code>0x2d523071538cd8a417858d78775e966c9171ffc8</code>
+
+Check the network before sending.""",
+                    json.dumps({"network": "BEP20", "address": "0x2d523071538cd8a417858d78775e966c9171ffc8"}),
+                )
+                await con.execute(
+                    """
+                    UPDATE payment_methods SET instructions_uk=$2, instructions_ru=$3, instructions_en=$4, details=$5::jsonb, updated_at=NOW()
+                    WHERE code=$1
+                    """,
+                    "ton",
+                    """💎 <b>TON</b>
+<code>UQDbfUbzkI8lfO6G1KAPB_F2Et2IRTM4EvFhX5ATaXYrjoV3</code>""",
+                    """💎 <b>TON</b>
+<code>UQDbfUbzkI8lfO6G1KAPB_F2Et2IRTM4EvFhX5ATaXYrjoV3</code>""",
+                    """💎 <b>TON</b>
+<code>UQDbfUbzkI8lfO6G1KAPB_F2Et2IRTM4EvFhX5ATaXYrjoV3</code>""",
+                    json.dumps({"network": "TON", "address": "UQDbfUbzkI8lfO6G1KAPB_F2Et2IRTM4EvFhX5ATaXYrjoV3"}),
+                )
+                manual_templates = {
+                    "template_payment_manual_uk": {
+                        "text": "💳 Ручна оплата\n\n💎 Тариф: {plan_name}\n{payment_amount_lines}\n\n{instructions}\n\nПісля оплати натисни «Я оплатив» і надішли скрін/квитанцію.",
+                        "entities": [],
+                    },
+                    "template_payment_manual_ru": {
+                        "text": "💳 Ручная оплата\n\n💎 Тариф: {plan_name}\n{payment_amount_lines}\n\n{instructions}\n\nПосле оплаты нажми «Я оплатил» и отправь скрин/квитанцию.",
+                        "entities": [],
+                    },
+                    "template_payment_manual_en": {
+                        "text": "💳 Manual payment\n\n💎 Plan: {plan_name}\n{payment_amount_lines}\n\n{instructions}\n\nAfter payment, press “I paid” and send a receipt/screenshot.",
+                        "entities": [],
+                    },
+                }
+                for key, value in manual_templates.items():
+                    await con.execute(
+                        """
+                        INSERT INTO settings(key, value) VALUES($1, $2::jsonb)
+                        ON CONFLICT(key) DO UPDATE SET value=$2::jsonb, updated_at=NOW()
+                        """,
+                        key,
+                        json.dumps(value),
+                    )
+                await con.execute(
+                    """
+                    INSERT INTO settings(key, value) VALUES('requisites_simplified_v2', 'true'::jsonb)
+                    ON CONFLICT(key) DO UPDATE SET value='true'::jsonb, updated_at=NOW()
+                    """
+                )
+
     async def upsert_user(self, user: dict[str, Any] | None, lang: str | None = None) -> dict[str, Any] | None:
         if not user or not user.get("id"):
             return None

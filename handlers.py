@@ -101,11 +101,25 @@ def amount_uah_line(amount: Decimal | None, lang: str) -> str:
     if amount is None:
         return ""
     if lang == "en":
-        return f"🇺🇦 <b>Amount in UAH:</b> {amount} UAH"
+        return f"🇺🇦 <b>To pay:</b> {amount} UAH"
     if lang == "ru":
-        return f"🇺🇦 <b>Сумма в грн:</b> {amount} грн"
-    return f"🇺🇦 <b>Сума в грн:</b> {amount} грн"
+        return f"🇺🇦 <b>К оплате:</b> {amount} грн"
+    return f"🇺🇦 <b>До сплати:</b> {amount} грн"
 
+
+def payment_amount_lines(amount_usd: Decimal, amount_uah: Decimal | None, method_code: str, lang: str) -> str:
+    amount_usd_s = str(amount_usd)
+    if method_code == "ua_card" and amount_uah is not None:
+        if lang == "en":
+            return f"🇺🇦 <b>To pay:</b> {amount_uah} UAH\n💵 <b>USD:</b> ${amount_usd_s}"
+        if lang == "ru":
+            return f"🇺🇦 <b>К оплате:</b> {amount_uah} грн\n💵 <b>USD:</b> ${amount_usd_s}"
+        return f"🇺🇦 <b>До сплати:</b> {amount_uah} грн\n💵 <b>USD:</b> ${amount_usd_s}"
+    if lang == "en":
+        return f"💵 <b>To pay:</b> ${amount_usd_s}"
+    if lang == "ru":
+        return f"💵 <b>К оплате:</b> ${amount_usd_s}"
+    return f"💵 <b>До сплати:</b> ${amount_usd_s}"
 
 def method_title(method: dict[str, Any], lang: str) -> str:
     return str(method.get(f"title_{lang}") or method.get("title_en") or method.get("code"))
@@ -256,11 +270,11 @@ DYNAMIC_TEMPLATE_SPECS = {
         },
     },
     "payment_manual": {
-        "vars": ["plan_name", "amount_usd", "amount_uah_line", "instructions"],
+        "vars": ["plan_name", "payment_amount_lines", "instructions"],
         "default": {
-            "uk": "💳 Ручна оплата\n\n💎 Тариф: {plan_name}\n💰 Сума: ${amount_usd}\n{amount_uah_line}\n\n{instructions}\n\nПісля оплати натисни «Я оплатив» і надішли скрін/квитанцію.",
-            "ru": "💳 Ручная оплата\n\n💎 Тариф: {plan_name}\n💰 Сумма: ${amount_usd}\n{amount_uah_line}\n\n{instructions}\n\nПосле оплаты нажми «Я оплатил» и отправь скрин/квитанцию.",
-            "en": "💳 Manual payment\n\n💎 Plan: {plan_name}\n💰 Amount: ${amount_usd}\n{amount_uah_line}\n\n{instructions}\n\nAfter payment, press “I paid” and send a receipt/screenshot.",
+            "uk": "💳 Ручна оплата\n\n💎 Тариф: {plan_name}\n{payment_amount_lines}\n\n{instructions}\n\nПісля оплати натисни «Я оплатив» і надішли скрін/квитанцію.",
+            "ru": "💳 Ручная оплата\n\n💎 Тариф: {plan_name}\n{payment_amount_lines}\n\n{instructions}\n\nПосле оплаты нажми «Я оплатил» и отправь скрин/квитанцию.",
+            "en": "💳 Manual payment\n\n💎 Plan: {plan_name}\n{payment_amount_lines}\n\n{instructions}\n\nAfter payment, press “I paid” and send a receipt/screenshot.",
         },
     },
 }
@@ -1431,6 +1445,7 @@ class BotHandlers:
             "plan_name": plan_name(plan, lang),
             "amount_usd": str(amount),
             "amount_uah_line": amount_uah_line(amount_uah, lang) if method_code == "ua_card" else "",
+            "payment_amount_lines": payment_amount_lines(amount, amount_uah, method_code, lang),
             "instructions": method_instructions(method, lang),
         }
         tpl = await self.db.get_template(f"payment_manual_{lang}")
