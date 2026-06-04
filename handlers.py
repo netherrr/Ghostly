@@ -101,32 +101,54 @@ def amount_uah_line(amount: Decimal | None, lang: str) -> str:
     if amount is None:
         return ""
     if lang == "en":
-        return f"🇺🇦 <b>To pay:</b> {amount} UAH"
+        return f"🇺🇦 To pay: {amount} UAH"
     if lang == "ru":
-        return f"🇺🇦 <b>К оплате:</b> {amount} грн"
-    return f"🇺🇦 <b>До сплати:</b> {amount} грн"
+        return f"🇺🇦 К оплате: {amount} грн"
+    return f"🇺🇦 До сплати: {amount} грн"
 
 
 def payment_amount_lines(amount_usd: Decimal, amount_uah: Decimal | None, method_code: str, lang: str) -> str:
+    """Plain amount lines safe for insertion into editable templates.
+
+    Dynamic template values must not contain <b>/<code>. If the template was
+    edited with Premium emoji, Telegram renders using entities and HTML tags
+    inside inserted variables become visible text.
+    """
     amount_usd_s = str(amount_usd)
     if method_code == "ua_card" and amount_uah is not None:
         if lang == "en":
-            return f"🇺🇦 <b>To pay:</b> {amount_uah} UAH\n💵 <b>USD:</b> ${amount_usd_s}"
+            return f"🇺🇦 To pay: {amount_uah} UAH\n💵 USD: ${amount_usd_s}"
         if lang == "ru":
-            return f"🇺🇦 <b>К оплате:</b> {amount_uah} грн\n💵 <b>USD:</b> ${amount_usd_s}"
-        return f"🇺🇦 <b>До сплати:</b> {amount_uah} грн\n💵 <b>USD:</b> ${amount_usd_s}"
+            return f"🇺🇦 К оплате: {amount_uah} грн\n💵 USD: ${amount_usd_s}"
+        return f"🇺🇦 До сплати: {amount_uah} грн\n💵 USD: ${amount_usd_s}"
     if lang == "en":
-        return f"💵 <b>To pay:</b> ${amount_usd_s}"
+        return f"💵 To pay: ${amount_usd_s}"
     if lang == "ru":
-        return f"💵 <b>К оплате:</b> ${amount_usd_s}"
-    return f"💵 <b>До сплати:</b> ${amount_usd_s}"
+        return f"💵 К оплате: ${amount_usd_s}"
+    return f"💵 До сплати: ${amount_usd_s}"
+
+
+def strip_visible_html_tags(value: str) -> str:
+    s = str(value or "")
+    replacements = {
+        "<b>": "", "</b>": "",
+        "<strong>": "", "</strong>": "",
+        "<i>": "", "</i>": "",
+        "<em>": "", "</em>": "",
+        "<code>": "", "</code>": "",
+        "<pre>": "", "</pre>": "",
+    }
+    for a, b in replacements.items():
+        s = s.replace(a, b)
+    return s.strip()
+
 
 def method_title(method: dict[str, Any], lang: str) -> str:
     return str(method.get(f"title_{lang}") or method.get("title_en") or method.get("code"))
 
 
 def method_instructions(method: dict[str, Any], lang: str) -> str:
-    return str(method.get(f"instructions_{lang}") or method.get("instructions_en") or "")
+    return strip_visible_html_tags(str(method.get(f"instructions_{lang}") or method.get("instructions_en") or ""))
 
 
 def looks_suspicious(text: str) -> bool:
@@ -495,6 +517,10 @@ def detect_template_from_target(target: dict[str, Any] | None, lang: str) -> str
         return f"referrals_{lang}"
     if any(x in low for x in ["оплата тарифу", "оплата тарифа", "plan payment", "обери спосіб оплати", "выбери способ оплаты", "choose payment method"]):
         return f"choose_payment_{lang}"
+    if any(x in low for x in ["надішли ключове слово", "отправь ключевое слово", "send the keyword", "ключове слово або фразу", "keyword or phrase"]):
+        return f"prompt_keyword_add_{lang}"
+    if any(x in low for x in ["надішли квитанцію", "отправь квитанцию", "send a receipt", "скрін/квитанцію", "receipt/screenshot"]):
+        return f"prompt_manual_payment_proof_{lang}"
     if any(x in low for x in ["ручна оплата", "ручная оплата", "manual payment", "я оплатив", "i paid", "квитанцію", "квитанцию"]):
         return f"payment_manual_{lang}"
     if any(x in low for x in ["ghostly", "що я вмію", "что я умею", "what i can", "особистий захист", "личный защит", "telegram-чат"]):
@@ -1030,7 +1056,8 @@ class BotHandlers:
         plans = await self.db.plans(active_only=True)
         plan_lines = []
         for p in plans:
-            plan_lines.append(tr(lang, "plan_line", name=e(plan_name(p, lang)), price=e(p["price_usd"]), days=e(plan_duration_label(p.get("duration_days"), lang)), features=e(plan_features(p, lang)).replace("\n", "\n")))
+            # Plain plan blocks are safe inside editable templates with Premium emoji.
+            plan_lines.append(f"💎 {plan_name(p, lang)} — ${p['price_usd']} / {plan_duration_label(p.get('duration_days'), lang)}\n{plan_features(p, lang)}")
         tpl = await self.db.get_template(f"plans_{lang}")
         if tpl:
             values = {"plans_list": "\n\n".join(plan_lines)}
@@ -1350,7 +1377,11 @@ class BotHandlers:
             await self.show_keywords(tg_id, lang, edit)
         elif data == "kw_add":
             await self.db.set_state(tg_id, "keyword_add", {})
-            await self._send_or_edit(tg_id, state_prompt(lang, "keyword_add", {}), cancel_keyboard(lang, "keywords"), edit)
+            tpl = await self.db.get_template(f"prompt_keyword_add_{lang}")
+            if tpl:
+                await self.send_template_screen(tg_id, tpl, cancel_keyboard(lang, "keywords"), edit)
+            else:
+                await self._send_or_edit(tg_id, state_prompt(lang, "keyword_add", {}), cancel_keyboard(lang, "keywords"), edit)
         elif data == "kw_delete_menu":
             await self.show_keyword_delete_menu(tg_id, lang, edit)
         elif data.startswith("kw_del:"):
@@ -1495,7 +1526,11 @@ class BotHandlers:
             await self.bot.send_message(tg_id, tr(lang, "payment_error"))
             return
         await self.db.set_state(tg_id, "manual_payment_proof", {"payment_id": payment_id})
-        await self.bot.send_message(tg_id, state_prompt(lang, "manual_payment_proof", {"payment_id": payment_id}), cancel_keyboard(lang, "plans"))
+        tpl = await self.db.get_template(f"prompt_manual_payment_proof_{lang}")
+        if tpl:
+            await self.send_template_screen(tg_id, tpl, cancel_keyboard(lang, "plans"))
+        else:
+            await self.bot.send_message(tg_id, state_prompt(lang, "manual_payment_proof", {"payment_id": payment_id}), cancel_keyboard(lang, "plans"))
 
     async def notify_admin_payment(self, payment_id: int) -> None:
         payment = await self.db.get_payment(payment_id)

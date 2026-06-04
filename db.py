@@ -689,6 +689,125 @@ Check the network before sending.""",
                     """
                 )
 
+
+            # Force-clean manual requisites v3: no HTML tags inside instructions.
+            # Payment templates can contain Premium emoji entities, so inserted
+            # requisites must be plain text or Telegram will show <b>/<code> as text.
+            clean_payments = await con.fetchval("SELECT value FROM settings WHERE key='requisites_plain_v3'")
+            if not clean_payments:
+                await con.execute(
+                    """
+                    INSERT INTO settings(key, value) VALUES('uah_rate', '44'::jsonb)
+                    ON CONFLICT(key) DO UPDATE SET value='44'::jsonb, updated_at=NOW()
+                    """
+                )
+                await con.execute(
+                    """
+                    UPDATE payment_methods SET instructions_uk=$2, instructions_ru=$3, instructions_en=$4, details=$5::jsonb, updated_at=NOW()
+                    WHERE code=$1
+                    """,
+                    "ua_card",
+                    """💳 Картка:
+4441114419666357
+
+👤 Отримувач:
+Назар М""",
+                    """💳 Карта:
+4441114419666357
+
+👤 Получатель:
+Назар М""",
+                    """💳 Card:
+4441114419666357
+
+👤 Recipient:
+Nazar M""",
+                    json.dumps({"card": "4441114419666357", "recipient": "Назар М"}),
+                )
+                await con.execute(
+                    """
+                    UPDATE payment_methods SET instructions_uk=$2, instructions_ru=$3, instructions_en=$4, details=$5::jsonb, updated_at=NOW()
+                    WHERE code=$1
+                    """,
+                    "binance_id",
+                    """🚗 Binance ID:
+482957043
+
+Nickname:
+travyx""",
+                    """🚗 Binance ID:
+482957043
+
+Nickname:
+travyx""",
+                    """🚗 Binance ID:
+482957043
+
+Nickname:
+travyx""",
+                    json.dumps({"binance_id": "482957043", "nickname": "travyx"}),
+                )
+                await con.execute(
+                    """
+                    UPDATE payment_methods SET instructions_uk=$2, instructions_ru=$3, instructions_en=$4, details=$5::jsonb, updated_at=NOW()
+                    WHERE code=$1
+                    """,
+                    "usdt_trc20",
+                    """🪙 USDT TRC20:
+TW2XKnkY6MdgsJxXZFXqFoucWkgxEqr7Ei
+
+Перевір мережу перед оплатою.""",
+                    """🪙 USDT TRC20:
+TW2XKnkY6MdgsJxXZFXqFoucWkgxEqr7Ei
+
+Проверь сеть перед оплатой.""",
+                    """🪙 USDT TRC20:
+TW2XKnkY6MdgsJxXZFXqFoucWkgxEqr7Ei
+
+Check the network before sending.""",
+                    json.dumps({"network": "TRC20", "address": "TW2XKnkY6MdgsJxXZFXqFoucWkgxEqr7Ei"}),
+                )
+                await con.execute(
+                    """
+                    UPDATE payment_methods SET instructions_uk=$2, instructions_ru=$3, instructions_en=$4, details=$5::jsonb, updated_at=NOW()
+                    WHERE code=$1
+                    """,
+                    "usdt_bep20",
+                    """🪙 USDT BEP20:
+0x2d523071538cd8a417858d78775e966c9171ffc8
+
+Перевір мережу перед оплатою.""",
+                    """🪙 USDT BEP20:
+0x2d523071538cd8a417858d78775e966c9171ffc8
+
+Проверь сеть перед оплатой.""",
+                    """🪙 USDT BEP20:
+0x2d523071538cd8a417858d78775e966c9171ffc8
+
+Check the network before sending.""",
+                    json.dumps({"network": "BEP20", "address": "0x2d523071538cd8a417858d78775e966c9171ffc8"}),
+                )
+                await con.execute(
+                    """
+                    UPDATE payment_methods SET instructions_uk=$2, instructions_ru=$3, instructions_en=$4, details=$5::jsonb, updated_at=NOW()
+                    WHERE code=$1
+                    """,
+                    "ton",
+                    """💎 TON:
+UQDbfUbzkI8lfO6G1KAPB_F2Et2IRTM4EvFhX5ATaXYrjoV3""",
+                    """💎 TON:
+UQDbfUbzkI8lfO6G1KAPB_F2Et2IRTM4EvFhX5ATaXYrjoV3""",
+                    """💎 TON:
+UQDbfUbzkI8lfO6G1KAPB_F2Et2IRTM4EvFhX5ATaXYrjoV3""",
+                    json.dumps({"network": "TON", "address": "UQDbfUbzkI8lfO6G1KAPB_F2Et2IRTM4EvFhX5ATaXYrjoV3"}),
+                )
+                await con.execute(
+                    """
+                    INSERT INTO settings(key, value) VALUES('requisites_plain_v3', 'true'::jsonb)
+                    ON CONFLICT(key) DO UPDATE SET value='true'::jsonb, updated_at=NOW()
+                    """
+                )
+
     async def upsert_user(self, user: dict[str, Any] | None, lang: str | None = None) -> dict[str, Any] | None:
         if not user or not user.get("id"):
             return None
