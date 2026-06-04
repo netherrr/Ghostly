@@ -313,7 +313,7 @@ class Database:
                 "connect_video_file_id": "",
                 "connect_video_kind": "video",
                 "referral_percent": 30,
-                "uah_rate": 42,
+                "uah_rate": 44,
             }
             for key, value in defaults.items():
                 await con.execute(
@@ -323,6 +323,223 @@ class Database:
                     """,
                     key,
                     json.dumps(value),
+                )
+
+            # One-time project setup requested by owner: prefill real payment
+            # details and set UAH/USD rate to 44. We mark it as applied so future
+            # restarts will not overwrite manual admin edits in the bot panel.
+            applied = await con.fetchval("SELECT value FROM settings WHERE key='requisites_prefill_v1'")
+            if not applied:
+                await con.execute(
+                    """
+                    INSERT INTO settings(key, value) VALUES('uah_rate', '44'::jsonb)
+                    ON CONFLICT(key) DO UPDATE SET value='44'::jsonb, updated_at=NOW()
+                    """
+                )
+                await con.execute(
+                    """
+                    INSERT INTO payment_methods(code, title_uk, title_ru, title_en, instructions_uk, instructions_ru, instructions_en, details, position, is_active)
+                    VALUES
+                    ('ua_card', 'Українська картка', 'Украинская карта', 'Ukrainian card',
+                     $1, $2, $3,
+                     $4::jsonb, 20, TRUE),
+                    ('binance_id', 'Binance ID', 'Binance ID', 'Binance ID',
+                     $5, $6, $7,
+                     $8::jsonb, 30, TRUE),
+                    ('usdt_trc20', 'USDT TRC20', 'USDT TRC20', 'USDT TRC20',
+                     $9, $10, $11,
+                     $12::jsonb, 40, TRUE),
+                    ('usdt_bep20', 'USDT BEP20', 'USDT BEP20', 'USDT BEP20',
+                     $13, $14, $15,
+                     $16::jsonb, 50, TRUE),
+                    ('ton', 'TON', 'TON', 'TON',
+                     $17, $18, $19,
+                     $20::jsonb, 60, TRUE)
+                    ON CONFLICT(code) DO UPDATE SET
+                        title_uk=EXCLUDED.title_uk,
+                        title_ru=EXCLUDED.title_ru,
+                        title_en=EXCLUDED.title_en,
+                        instructions_uk=EXCLUDED.instructions_uk,
+                        instructions_ru=EXCLUDED.instructions_ru,
+                        instructions_en=EXCLUDED.instructions_en,
+                        details=EXCLUDED.details,
+                        position=EXCLUDED.position,
+                        is_active=TRUE,
+                        updated_at=NOW()
+                    """,
+                    """💳 <b>Українська картка — ручна оплата</b>
+
+Сума до оплати в гривні буде показана вище в повідомленні бота. Переказуй саме цю суму.
+
+💳 <b>Картка:</b>
+<code>4441114419666357</code>
+
+👤 <b>Отримувач:</b>
+<code>Назар М</code>
+
+Після оплати натисни «Я оплатив» і надішли скріншот, квитанцію або файл підтвердження.
+
+Доступ активується після перевірки адміністратором.""",
+                    """💳 <b>Украинская карта — ручная оплата</b>
+
+Сумма к оплате в гривне будет показана выше в сообщении бота. Переводи именно эту сумму.
+
+💳 <b>Карта:</b>
+<code>4441114419666357</code>
+
+👤 <b>Получатель:</b>
+<code>Назар М</code>
+
+После оплаты нажми «Я оплатил» и отправь скриншот, квитанцию или файл подтверждения.
+
+Доступ активируется после проверки администратором.""",
+                    """💳 <b>Ukrainian card — manual payment</b>
+
+The UAH amount will be shown above in the bot message. Please send exactly that amount.
+
+💳 <b>Card:</b>
+<code>4441114419666357</code>
+
+👤 <b>Recipient:</b>
+<code>Nazar M</code>
+
+After payment, press “I paid” and send a screenshot, receipt, or confirmation file.
+
+Access will be activated after admin verification.""",
+                    json.dumps({"card":"4441114419666357","recipient":"Назар М"}),
+                    """🚗 <b>Binance ID — ручна оплата</b>
+
+Оплати суму, яку бот показав вище.
+
+🚗 <b>BINANCE ID:</b>
+<code>482957043</code>
+
+Nickname:
+<code>travyx</code>
+
+Після оплати натисни «Я оплатив» і надішли скріншот, квитанцію або TxID/коментар платежу.""",
+                    """🚗 <b>Binance ID — ручная оплата</b>
+
+Оплати сумму, которую бот показал выше.
+
+🚗 <b>BINANCE ID:</b>
+<code>482957043</code>
+
+Nickname:
+<code>travyx</code>
+
+После оплаты нажми «Я оплатил» и отправь скриншот, квитанцию или TxID/комментарий платежа.""",
+                    """🚗 <b>Binance ID — manual payment</b>
+
+Send the amount shown above by the bot.
+
+🚗 <b>BINANCE ID:</b>
+<code>482957043</code>
+
+Nickname:
+<code>travyx</code>
+
+After payment, press “I paid” and send a screenshot, receipt, or TxID/payment comment.""",
+                    json.dumps({"binance_id":"482957043","nickname":"travyx"}),
+                    """🪙 <b>USDT TRC20 — ручна оплата</b>
+
+Оплати суму, яку бот показав вище.
+
+Мережа: <b>TRC20</b>
+Гаманець:
+<code>TW2XKnkY6MdgsJxXZFXqFoucWkgxEqr7Ei</code>
+
+Після оплати натисни «Я оплатив» і надішли скріншот, квитанцію або hash/TxID транзакції.
+
+Важливо: перевір мережу перед оплатою. Якщо відправити USDT не в ту мережу, платіж може бути втрачений.""",
+                    """🪙 <b>USDT TRC20 — ручная оплата</b>
+
+Оплати сумму, которую бот показал выше.
+
+Сеть: <b>TRC20</b>
+Кошелёк:
+<code>TW2XKnkY6MdgsJxXZFXqFoucWkgxEqr7Ei</code>
+
+После оплаты нажми «Я оплатил» и отправь скриншот, квитанцию или hash/TxID транзакции.
+
+Важно: проверь сеть перед оплатой. Если отправить USDT не в ту сеть, платёж может быть потерян.""",
+                    """🪙 <b>USDT TRC20 — manual payment</b>
+
+Send the amount shown above by the bot.
+
+Network: <b>TRC20</b>
+Wallet:
+<code>TW2XKnkY6MdgsJxXZFXqFoucWkgxEqr7Ei</code>
+
+After payment, press “I paid” and send a screenshot, receipt, or transaction hash/TxID.
+
+Important: check the network before sending. If USDT is sent through the wrong network, the payment may be lost.""",
+                    json.dumps({"network":"TRC20","address":"TW2XKnkY6MdgsJxXZFXqFoucWkgxEqr7Ei"}),
+                    """🪙 <b>USDT BEP20 — ручна оплата</b>
+
+Оплати суму, яку бот показав вище.
+
+Мережа: <b>BEP20</b>
+Гаманець:
+<code>0x2d523071538cd8a417858d78775e966c9171ffc8</code>
+
+Після оплати натисни «Я оплатив» і надішли скріншот, квитанцію або hash/TxID транзакції.
+
+Важливо: перевір мережу перед оплатою. Якщо відправити USDT не в ту мережу, платіж може бути втрачений.""",
+                    """🪙 <b>USDT BEP20 — ручная оплата</b>
+
+Оплати сумму, которую бот показал выше.
+
+Сеть: <b>BEP20</b>
+Кошелёк:
+<code>0x2d523071538cd8a417858d78775e966c9171ffc8</code>
+
+После оплаты нажми «Я оплатил» и отправь скриншот, квитанцию или hash/TxID транзакции.
+
+Важно: проверь сеть перед оплатой. Если отправить USDT не в ту сеть, платёж может быть потерян.""",
+                    """🪙 <b>USDT BEP20 — manual payment</b>
+
+Send the amount shown above by the bot.
+
+Network: <b>BEP20</b>
+Wallet:
+<code>0x2d523071538cd8a417858d78775e966c9171ffc8</code>
+
+After payment, press “I paid” and send a screenshot, receipt, or transaction hash/TxID.
+
+Important: check the network before sending. If USDT is sent through the wrong network, the payment may be lost.""",
+                    json.dumps({"network":"BEP20","address":"0x2d523071538cd8a417858d78775e966c9171ffc8"}),
+                    """💎 <b>TON — ручна оплата</b>
+
+Оплати суму, яку бот показав вище.
+
+TON-гаманець:
+<code>UQDbfUbzkI8lfO6G1KAPB_F2Et2IRTM4EvFhX5ATaXYrjoV3</code>
+
+Після оплати натисни «Я оплатив» і надішли скріншот, квитанцію або hash/TxID транзакції.""",
+                    """💎 <b>TON — ручная оплата</b>
+
+Оплати сумму, которую бот показал выше.
+
+TON-кошелёк:
+<code>UQDbfUbzkI8lfO6G1KAPB_F2Et2IRTM4EvFhX5ATaXYrjoV3</code>
+
+После оплаты нажми «Я оплатил» и отправь скриншот, квитанцию или hash/TxID транзакции.""",
+                    """💎 <b>TON — manual payment</b>
+
+Send the amount shown above by the bot.
+
+TON wallet:
+<code>UQDbfUbzkI8lfO6G1KAPB_F2Et2IRTM4EvFhX5ATaXYrjoV3</code>
+
+After payment, press “I paid” and send a screenshot, receipt, or transaction hash/TxID.""",
+                    json.dumps({"network":"TON","address":"UQDbfUbzkI8lfO6G1KAPB_F2Et2IRTM4EvFhX5ATaXYrjoV3"}),
+                )
+                await con.execute(
+                    """
+                    INSERT INTO settings(key, value) VALUES('requisites_prefill_v1', 'true'::jsonb)
+                    ON CONFLICT(key) DO UPDATE SET value='true'::jsonb, updated_at=NOW()
+                    """
                 )
 
     async def upsert_user(self, user: dict[str, Any] | None, lang: str | None = None) -> dict[str, Any] | None:
