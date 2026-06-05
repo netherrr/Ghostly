@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
+import json
 import aiohttp
 
 
@@ -31,30 +32,6 @@ class BotAPI:
             if not data.get("ok"):
                 raise TelegramAPIError(f"Telegram API error {method}: {data}")
             return data["result"]
-
-    async def request_multipart(self, method: str, form: aiohttp.FormData) -> dict[str, Any]:
-        await self.start()
-        assert self.session is not None
-        async with self.session.post(f"{self.base_url}/{method}", data=form) as resp:
-            data = await resp.json(content_type=None)
-            if not data.get("ok"):
-                raise TelegramAPIError(f"Telegram API error {method}: {data}")
-            return data["result"]
-
-    async def send_document_bytes(
-        self,
-        chat_id: int | str,
-        filename: str,
-        data: bytes,
-        caption: str | None = None,
-    ) -> dict[str, Any]:
-        form = aiohttp.FormData()
-        form.add_field("chat_id", str(chat_id))
-        form.add_field("document", data, filename=filename, content_type="application/zip")
-        if caption:
-            form.add_field("caption", caption[:1024])
-            form.add_field("parse_mode", "HTML")
-        return await self.request_multipart("sendDocument", form)
 
     async def set_webhook(self, url: str, secret_token: str) -> dict[str, Any]:
         return await self.request(
@@ -207,6 +184,67 @@ class BotAPI:
 
     async def delete_message(self, chat_id: int | str, message_id: int) -> dict[str, Any]:
         return await self.request("deleteMessage", {"chat_id": chat_id, "message_id": message_id})
+
+
+    async def get_file(self, file_id: str) -> dict[str, Any]:
+        return await self.request("getFile", {"file_id": file_id})
+
+    async def download_file(self, file_path: str, max_bytes: int = 25 * 1024 * 1024) -> bytes:
+        await self.start()
+        assert self.session is not None
+        url = f"https://api.telegram.org/file/bot{self.token}/{file_path}"
+        async with self.session.get(url) as resp:
+            resp.raise_for_status()
+            data = await resp.read()
+            if len(data) > max_bytes:
+                raise TelegramAPIError(f"Telegram file too large for fallback upload: {len(data)} bytes")
+            return data
+
+    async def request_form(self, method: str, form: aiohttp.FormData) -> dict[str, Any]:
+        await self.start()
+        assert self.session is not None
+        async with self.session.post(f"{self.base_url}/{method}", data=form) as resp:
+            data = await resp.json(content_type=None)
+            if not data.get("ok"):
+                raise TelegramAPIError(f"Telegram API error {method}: {data}")
+            return data["result"]
+
+    async def send_media_bytes(
+        self,
+        chat_id: int | str,
+        kind: str,
+        filename: str,
+        content: bytes,
+        caption: str | None = None,
+        reply_markup: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Upload cached media bytes again.
+
+        Used as a fallback for Business media file_ids that Telegram may reject
+        when re-sending after the original message was deleted.
+        """
+        method_map = {
+            "photo": ("sendPhoto", "photo"),
+            "video": ("sendVideo", "video"),
+            "animation": ("sendAnimation", "animation"),
+            "audio": ("sendAudio", "audio"),
+            "voice": ("sendVoice", "voice"),
+            "document": ("sendDocument", "document"),
+        }
+        method, field = method_map.get(kind, ("sendDocument", "document"))
+        form = aiohttp.FormData()
+        form.add_field("chat_id", str(chat_id))
+        form.add_field(field, content, filename=filename)
+        if caption and kind not in {"voice"}:
+            form.add_field("caption", caption[:1024])
+            form.add_field("parse_mode", "HTML")
+        elif caption and kind == "voice":
+            # Telegram supports voice captions, keep it short and plain-safe.
+            form.add_field("caption", caption[:1024])
+        if reply_markup:
+            form.add_field("reply_markup", json.dumps(reply_markup, ensure_ascii=False))
+        return await self.request_form(method, form)
+
 
     async def send_cached_media(
         self,

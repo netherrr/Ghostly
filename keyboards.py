@@ -116,10 +116,10 @@ def referral_keyboard(lang: str, bot_username: str, user_id: int) -> dict[str, A
 def admin_menu(lang: str) -> dict[str, Any]:
     return inline([
         [(btn(lang, "admin_stats"), "admin_stats"), (btn(lang, "admin_pending"), "admin_pending")],
-        [("📥 CSV / Export", "admin_export_csv"), (btn(lang, "admin_users"), "admin_users")],
         [(btn(lang, "admin_plans"), "admin_plans"), (btn(lang, "admin_methods"), "admin_methods")],
         [(btn(lang, "admin_grant"), "admin_grant"), (btn(lang, "admin_revoke"), "admin_revoke")],
-        [(btn(lang, "admin_settings"), "admin_settings"), (btn(lang, "admin_referrals"), "admin_referrals")],
+        [(btn(lang, "admin_settings"), "admin_settings"), (btn(lang, "admin_users"), "admin_users")],
+        [(btn(lang, "admin_referrals"), "admin_referrals")],
         [(btn(lang, "back"), "menu")],
     ])
 
