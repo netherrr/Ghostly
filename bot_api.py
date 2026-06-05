@@ -32,6 +32,30 @@ class BotAPI:
                 raise TelegramAPIError(f"Telegram API error {method}: {data}")
             return data["result"]
 
+    async def request_multipart(self, method: str, form: aiohttp.FormData) -> dict[str, Any]:
+        await self.start()
+        assert self.session is not None
+        async with self.session.post(f"{self.base_url}/{method}", data=form) as resp:
+            data = await resp.json(content_type=None)
+            if not data.get("ok"):
+                raise TelegramAPIError(f"Telegram API error {method}: {data}")
+            return data["result"]
+
+    async def send_document_bytes(
+        self,
+        chat_id: int | str,
+        filename: str,
+        data: bytes,
+        caption: str | None = None,
+    ) -> dict[str, Any]:
+        form = aiohttp.FormData()
+        form.add_field("chat_id", str(chat_id))
+        form.add_field("document", data, filename=filename, content_type="application/zip")
+        if caption:
+            form.add_field("caption", caption[:1024])
+            form.add_field("parse_mode", "HTML")
+        return await self.request_multipart("sendDocument", form)
+
     async def set_webhook(self, url: str, secret_token: str) -> dict[str, Any]:
         return await self.request(
             "setWebhook",

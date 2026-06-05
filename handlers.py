@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import csv
 import html
+import io
 import json
 import os
 import re
+import zipfile
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 from decimal import Decimal
@@ -40,6 +43,36 @@ from keyboards import (
 
 def e(value: Any) -> str:
     return html.escape(str(value)) if value is not None else ""
+
+
+def csv_value(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, datetime):
+        return dt(value)
+    if isinstance(value, Decimal):
+        return str(value)
+    if isinstance(value, (dict, list, tuple)):
+        return json.dumps(value, ensure_ascii=False)
+    return str(value)
+
+
+def rows_to_csv_bytes(rows: list[dict[str, Any]], preferred_fields: list[str] | None = None) -> bytes:
+    output = io.StringIO(newline="")
+    fields: list[str] = []
+    if preferred_fields:
+        fields.extend(preferred_fields)
+    for row in rows:
+        for key in row.keys():
+            if key not in fields:
+                fields.append(key)
+    if not fields:
+        fields = ["empty"]
+    writer = csv.DictWriter(output, fieldnames=fields, extrasaction="ignore")
+    writer.writeheader()
+    for row in rows:
+        writer.writerow({field: csv_value(row.get(field)) for field in fields})
+    return ("﻿" + output.getvalue()).encode("utf-8")
 
 
 APP_TIMEZONE_NAME = os.getenv("APP_TIMEZONE", "Europe/Kyiv").strip() or "Europe/Kyiv"
@@ -1779,6 +1812,8 @@ class BotHandlers:
             return
         if data == "admin_stats":
             await self.show_admin_stats(tg_id, lang, edit)
+        elif data == "admin_export_csv":
+            await self.send_admin_csv_export(tg_id, lang)
         elif data == "admin_pending":
             await self.show_admin_pending(tg_id, lang, edit)
         elif data == "admin_referrals":
@@ -1858,6 +1893,213 @@ class BotHandlers:
                 await self.bot.copy_message(admin_id, int(proof["source_chat_id"]), int(proof["source_message_id"]))
             except Exception as exc:
                 await self.bot.send_message(admin_id, f"Не вийшло скопіювати доказ: <code>{e(repr(exc))}</code>")
+
+    async def send_admin_csv_export(self, tg_id: int, lang: str) -> None:
+        if not await self.db.is_admin(tg_id):
+            await self.bot.send_message(tg_id, tr(lang, "not_admin"))
+            return
+        await self.bot.send_message(tg_id, "📦 <b>Готую детальний CSV-експорт...</b>\n\nЗараз надішлю ZIP з таблицями: users, payments, messages, deleted, referrals, plans, settings.")
+        try:
+            data, filename, caption = await self.build_admin_csv_export()
+            await self.bot.send_document_bytes(tg_id, filename, data, caption)
+        except Exception as exc:
+            print("CSV export error:", repr(exc))
+            await self.bot.send_message(tg_id, f"❌ Не вийшло створити CSV-експорт: <code>{e(repr(exc))}</code>")
+
+    async def build_admin_csv_export(self) -> tuple[bytes, str, str]:
+        created_at = datetime.now(timezone.utc)
+        export_stamp = created_at.astimezone(APP_TIMEZONE).strftime("%Y-%m-%d_%H-%M")
+        async with self.db._pool().acquire() as con:
+            summary = [dict(r) for r in await con.fetch("""
+                SELECT 'users_total' AS metric, COUNT(*)::TEXT AS value FROM users
+                UNION ALL SELECT 'users_today', COUNT(*)::TEXT FROM users WHERE created_at >= NOW() - INTERVAL '1 day'
+                UNION ALL SELECT 'users_7d', COUNT(*)::TEXT FROM users WHERE created_at >= NOW() - INTERVAL '7 days'
+                UNION ALL SELECT 'users_30d', COUNT(*)::TEXT FROM users WHERE created_at >= NOW() - INTERVAL '30 days'
+                UNION ALL SELECT 'active_subscriptions', COUNT(*)::TEXT FROM users WHERE subscription_until > NOW()
+                UNION ALL SELECT 'business_connections_enabled', COUNT(*)::TEXT FROM business_connections WHERE is_enabled=TRUE
+                UNION ALL SELECT 'cached_messages', COUNT(*)::TEXT FROM cached_messages
+                UNION ALL SELECT 'deleted_events', COUNT(*)::TEXT FROM deleted_events
+                UNION ALL SELECT 'deleted_delivered', COUNT(*)::TEXT FROM deleted_events WHERE delivered=TRUE
+                UNION ALL SELECT 'keywords_active', COUNT(*)::TEXT FROM user_keywords WHERE is_active=TRUE
+                UNION ALL SELECT 'payments_total', COUNT(*)::TEXT FROM payments
+                UNION ALL SELECT 'payments_paid', COUNT(*)::TEXT FROM payments WHERE status='paid'
+                UNION ALL SELECT 'payments_pending', COUNT(*)::TEXT FROM payments WHERE status IN ('pending','waiting_admin')
+                UNION ALL SELECT 'payments_rejected', COUNT(*)::TEXT FROM payments WHERE status='rejected'
+                UNION ALL SELECT 'revenue_paid_usd', COALESCE(SUM(amount_usd),0)::TEXT FROM payments WHERE status='paid'
+                UNION ALL SELECT 'stars_paid_total', COALESCE(SUM(CASE WHEN provider='telegram_stars' AND status='paid' THEN COALESCE((raw->>'stars')::INT,0) ELSE 0 END),0)::TEXT FROM payments
+                UNION ALL SELECT 'referral_users', COUNT(*)::TEXT FROM users WHERE referrer_id IS NOT NULL
+                UNION ALL SELECT 'referral_rewards_usd', COALESCE(SUM(reward_amount_usd),0)::TEXT FROM referral_rewards
+            """)]
+            summary.append({"metric": "export_created_at", "value": dt(created_at)})
+
+            users = [dict(r) for r in await con.fetch("""
+                SELECT
+                    u.tg_id, u.username, u.first_name, u.last_name, u.lang, u.is_admin,
+                    u.created_at, u.updated_at, u.subscription_until,
+                    (u.subscription_until > NOW()) AS active_subscription,
+                    u.free_deleted_today, u.free_deleted_reset_date,
+                    u.referrer_id, ref.username AS referrer_username,
+                    EXISTS(SELECT 1 FROM business_connections bc WHERE bc.owner_tg_id=u.tg_id AND bc.is_enabled=TRUE) AS business_connected,
+                    (SELECT COUNT(*) FROM cached_messages cm WHERE cm.owner_tg_id=u.tg_id) AS cached_messages,
+                    (SELECT COUNT(*) FROM deleted_events de WHERE de.owner_tg_id=u.tg_id) AS deleted_events,
+                    (SELECT COUNT(*) FROM deleted_events de WHERE de.owner_tg_id=u.tg_id AND de.delivered=TRUE) AS delivered_deleted,
+                    (SELECT COUNT(*) FROM user_keywords kw WHERE kw.owner_tg_id=u.tg_id AND kw.is_active=TRUE) AS active_keywords,
+                    (SELECT COUNT(*) FROM payments p WHERE p.user_id=u.tg_id) AS payments_count,
+                    (SELECT COALESCE(SUM(amount_usd),0) FROM payments p WHERE p.user_id=u.tg_id AND p.status='paid') AS paid_total_usd,
+                    (SELECT COALESCE(SUM(CASE WHEN p.provider='telegram_stars' AND p.status='paid' THEN COALESCE((p.raw->>'stars')::INT,0) ELSE 0 END),0) FROM payments p WHERE p.user_id=u.tg_id) AS paid_stars_total,
+                    (SELECT COUNT(*) FROM users child WHERE child.referrer_id=u.tg_id) AS invited_users,
+                    (SELECT COALESCE(SUM(reward_amount_usd),0) FROM referral_rewards rr WHERE rr.referrer_id=u.tg_id) AS referral_earned_usd,
+                    (SELECT COALESCE(SUM(CASE WHEN status='available' THEN reward_amount_usd ELSE 0 END),0) FROM referral_rewards rr WHERE rr.referrer_id=u.tg_id) AS referral_available_usd
+                FROM users u
+                LEFT JOIN users ref ON ref.tg_id=u.referrer_id
+                ORDER BY u.created_at DESC
+            """)]
+
+            payments = [dict(r) for r in await con.fetch("""
+                SELECT
+                    p.id, p.user_id, u.username, u.first_name, u.last_name,
+                    p.provider, p.status, p.amount_usd, p.currency,
+                    COALESCE(p.raw->>'stars','') AS stars,
+                    pl.code AS plan_code, pl.name_uk AS plan_name_uk, pl.duration_days,
+                    p.external_id, p.invoice_url,
+                    p.created_at, p.paid_at, p.admin_checked_by, p.admin_note,
+                    COALESCE(p.raw->>'telegram_payment_charge_id','') AS telegram_payment_charge_id,
+                    COALESCE(p.raw->>'amount_uah','') AS amount_uah,
+                    COALESCE(p.raw->>'uah_rate','') AS uah_rate
+                FROM payments p
+                LEFT JOIN users u ON u.tg_id=p.user_id
+                LEFT JOIN plans pl ON pl.id=p.plan_id
+                ORDER BY p.created_at DESC
+            """)]
+
+            payment_summary = [dict(r) for r in await con.fetch("""
+                SELECT provider, status, currency, COUNT(*) AS count, COALESCE(SUM(amount_usd),0) AS amount_usd,
+                       COALESCE(SUM(CASE WHEN provider='telegram_stars' THEN COALESCE((raw->>'stars')::INT,0) ELSE 0 END),0) AS stars
+                FROM payments
+                GROUP BY provider, status, currency
+                ORDER BY provider, status, currency
+            """)]
+
+            plans = [dict(r) for r in await con.fetch("""
+                SELECT id, code, name_uk, name_ru, name_en, price_usd, price_uah, price_stars, duration_days, is_active, position, created_at, updated_at
+                FROM plans ORDER BY position, id
+            """)]
+
+            methods = [dict(r) for r in await con.fetch("""
+                SELECT code, title_uk, title_ru, title_en, is_active, position, created_at, updated_at, details
+                FROM payment_methods ORDER BY position, code
+            """)]
+
+            connections = [dict(r) for r in await con.fetch("""
+                SELECT bc.id, bc.owner_tg_id, u.username, u.first_name, u.last_name,
+                       bc.user_chat_id, bc.can_reply, bc.is_enabled, bc.created_at, bc.updated_at
+                FROM business_connections bc
+                LEFT JOIN users u ON u.tg_id=bc.owner_tg_id
+                ORDER BY bc.updated_at DESC
+            """)]
+
+            messages = [dict(r) for r in await con.fetch("""
+                SELECT id, owner_tg_id, chat_id, message_id, sender_id, sender_name, chat_title,
+                       content_type, LEFT(COALESCE(text, caption, ''), 500) AS text_preview,
+                       CASE WHEN file_id IS NULL THEN FALSE ELSE TRUE END AS has_file,
+                       jsonb_array_length(COALESCE(edited_versions, '[]'::jsonb)) AS edits_count,
+                       created_at, updated_at, deleted_at
+                FROM cached_messages
+                ORDER BY created_at DESC
+                LIMIT 5000
+            """)]
+
+            deleted = [dict(r) for r in await con.fetch("""
+                SELECT de.id, de.owner_tg_id, u.username, de.chat_id, de.message_id,
+                       de.cached_message_id, de.delivered,
+                       cm.chat_title, cm.sender_name, cm.content_type,
+                       LEFT(COALESCE(cm.text, cm.caption, ''), 500) AS saved_copy_preview,
+                       de.created_at
+                FROM deleted_events de
+                LEFT JOIN users u ON u.tg_id=de.owner_tg_id
+                LEFT JOIN cached_messages cm ON cm.id=de.cached_message_id
+                ORDER BY de.created_at DESC
+                LIMIT 5000
+            """)]
+
+            keywords = [dict(r) for r in await con.fetch("""
+                SELECT kw.owner_tg_id, u.username, kw.keyword, kw.is_active, kw.created_at
+                FROM user_keywords kw
+                LEFT JOIN users u ON u.tg_id=kw.owner_tg_id
+                ORDER BY kw.created_at DESC
+            """)]
+
+            referrals = [dict(r) for r in await con.fetch("""
+                SELECT rr.id, rr.referrer_id, ref.username AS referrer_username,
+                       rr.buyer_id, buyer.username AS buyer_username,
+                       rr.payment_id, rr.percent, rr.purchase_amount_usd, rr.reward_amount_usd,
+                       rr.status, rr.created_at, rr.paid_at, rr.admin_checked_by
+                FROM referral_rewards rr
+                LEFT JOIN users ref ON ref.tg_id=rr.referrer_id
+                LEFT JOIN users buyer ON buyer.tg_id=rr.buyer_id
+                ORDER BY rr.created_at DESC
+            """)]
+
+            ref_top = [dict(r) for r in await con.fetch("""
+                SELECT u.tg_id, u.username, u.first_name, u.last_name,
+                       COUNT(DISTINCT child.tg_id) AS invited_users,
+                       COUNT(rr.id) AS reward_count,
+                       COALESCE(SUM(rr.purchase_amount_usd),0) AS referred_sales_usd,
+                       COALESCE(SUM(rr.reward_amount_usd),0) AS earned_usd,
+                       COALESCE(SUM(CASE WHEN rr.status='available' THEN rr.reward_amount_usd ELSE 0 END),0) AS available_usd,
+                       COALESCE(SUM(CASE WHEN rr.status='paid' THEN rr.reward_amount_usd ELSE 0 END),0) AS paid_usd
+                FROM users u
+                LEFT JOIN users child ON child.referrer_id=u.tg_id
+                LEFT JOIN referral_rewards rr ON rr.referrer_id=u.tg_id
+                WHERE child.tg_id IS NOT NULL OR rr.id IS NOT NULL
+                GROUP BY u.tg_id, u.username, u.first_name, u.last_name
+                ORDER BY earned_usd DESC, invited_users DESC
+            """)]
+
+            settings_rows = [dict(r) for r in await con.fetch("""
+                SELECT key, value, updated_at FROM settings ORDER BY key
+            """)]
+
+        files: list[tuple[str, list[dict[str, Any]], list[str] | None]] = [
+            ("00_summary.csv", summary, ["metric", "value"]),
+            ("01_users.csv", users, None),
+            ("02_payments.csv", payments, None),
+            ("03_payment_summary.csv", payment_summary, None),
+            ("04_plans.csv", plans, None),
+            ("05_payment_methods.csv", methods, None),
+            ("06_business_connections.csv", connections, None),
+            ("07_cached_messages_last_5000.csv", messages, None),
+            ("08_deleted_events_last_5000.csv", deleted, None),
+            ("09_keywords.csv", keywords, None),
+            ("10_referral_rewards.csv", referrals, None),
+            ("11_referral_top.csv", ref_top, None),
+            ("12_settings.csv", settings_rows, None),
+        ]
+
+        zip_buffer = io.BytesIO()
+        with zipfile.ZipFile(zip_buffer, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+            for filename, rows, fields in files:
+                zf.writestr(filename, rows_to_csv_bytes(rows, fields))
+            readme = (
+                "Ghostly Guard admin export\n"
+                f"Created: {dt(created_at)}\n\n"
+                "Files:\n"
+                "00_summary.csv — main metrics\n"
+                "01_users.csv — users, subscriptions, business status, payments/referrals per user\n"
+                "02_payments.csv — all payments\n"
+                "03_payment_summary.csv — payments grouped by provider/status\n"
+                "07_cached_messages_last_5000.csv and 08_deleted_events_last_5000.csv are limited to 5000 newest rows to keep export fast.\n"
+            )
+            zf.writestr("README.txt", readme)
+        data = zip_buffer.getvalue()
+        filename = f"ghostly_stats_{export_stamp}.zip"
+        caption = (
+            "📊 <b>Ghostly Guard CSV export</b>\n"
+            f"Створено: <b>{e(dt(created_at))}</b>\n"
+            f"Користувачів: <b>{e(next((x['value'] for x in summary if x['metric']=='users_total'), '0'))}</b>\n"
+            f"Платних оплат: <b>{e(next((x['value'] for x in summary if x['metric']=='payments_paid'), '0'))}</b>"
+        )
+        return data, filename, caption
 
     async def show_admin_stats(self, tg_id: int, lang: str, edit: tuple[int, int] | None = None) -> None:
         s = await self.db.stats()
@@ -2135,6 +2377,8 @@ class BotHandlers:
         try:
             if cmd == "/stats":
                 await self.show_admin_stats(admin_id, lang)
+            elif cmd in {"/csv", "/stats_csv", "/export_csv"}:
+                await self.send_admin_csv_export(admin_id, lang)
             elif cmd == "/plans_admin":
                 await self.show_admin_plans(admin_id, lang)
             elif cmd == "/methods_admin":
