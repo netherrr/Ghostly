@@ -2130,9 +2130,19 @@ class BotHandlers:
         except Exception as exc:
             print(f"Send cached media by file_id failed kind={kind}:", repr(exc))
 
-        # Some media types cannot be re-uploaded as their original type easily.
-        # As a last resort, send the binary as a document so the user still gets it.
-        fallback_kind = kind if kind in {"photo", "video", "animation", "audio", "voice", "document"} else "document"
+        # Some users/chats forbid voice messages from bots. In that case Telegram
+        # returns VOICE_MESSAGES_FORBIDDEN. We must not retry sendVoice again:
+        # upload it as a regular document so the user can still download/listen.
+        #
+        # video_note and stickers are also safer as documents when re-uploading
+        # from deleted Business messages.
+        if kind == "voice":
+            fallback_kind = "document"
+        elif kind in {"photo", "video", "animation", "audio", "document"}:
+            fallback_kind = kind
+        else:
+            fallback_kind = "document"
+
         ext_map = {
             "photo": "jpg",
             "video": "mp4",
