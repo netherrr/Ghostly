@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import html
 import json
+import os
 import re
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 from decimal import Decimal
 from typing import Any
 
@@ -40,13 +42,27 @@ def e(value: Any) -> str:
     return html.escape(str(value)) if value is not None else ""
 
 
+APP_TIMEZONE_NAME = os.getenv("APP_TIMEZONE", "Europe/Kyiv").strip() or "Europe/Kyiv"
+try:
+    APP_TIMEZONE = ZoneInfo(APP_TIMEZONE_NAME)
+except Exception:
+    APP_TIMEZONE = timezone.utc
+    APP_TIMEZONE_NAME = "UTC"
+
+
 def dt(value: Any) -> str:
     if not value:
         return "—"
     if isinstance(value, str):
         return value
     try:
-        return value.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+        # Telegram/DB timestamps are stored in UTC. Show them in the project/user
+        # timezone so deleted-message alerts match the time users see in Telegram.
+        if getattr(value, "tzinfo", None) is None:
+            value = value.replace(tzinfo=timezone.utc)
+        local_value = value.astimezone(APP_TIMEZONE)
+        label = "Київ" if APP_TIMEZONE_NAME in {"Europe/Kyiv", "Europe/Kiev"} else APP_TIMEZONE_NAME
+        return local_value.strftime("%d.%m.%Y %H:%M") + f" ({label})"
     except Exception:
         return str(value)
 

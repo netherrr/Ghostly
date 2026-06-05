@@ -255,3 +255,7 @@ Important notes:
 - Auto-detection now checks connect/privacy/business screens before the generic start screen, so “How to connect Ghostly” will no longer be saved as `start_uk` by mistake.
 - Telegram media captions have a 1024-character limit. If your caption is longer, the bot sends media first and then sends the rich text with buttons as a separate message.
 - To remove media from a template, reply to the media screen with `/edit` and send text-only replacement content.
+
+
+### Timezone
+Set `APP_TIMEZONE=Europe/Kyiv` in Railway Variables to display deleted-message times in Kyiv/local project time instead of UTC.
