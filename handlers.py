@@ -5,6 +5,8 @@ import io
 import json
 import os
 import re
+import subprocess
+import tempfile
 import zipfile
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
@@ -2119,6 +2121,54 @@ class BotHandlers:
             print("Send deleted message error:", repr(exc))
             return False
 
+    def convert_audio_to_mp3(self, content: bytes, source_suffix: str = ".ogg") -> bytes | None:
+        """Convert Telegram voice/audio bytes to MP3 using ffmpeg.
+
+        Returns None if ffmpeg is unavailable or conversion fails.
+        """
+        in_path = None
+        out_path = None
+        try:
+            with tempfile.NamedTemporaryFile(delete=False, suffix=source_suffix) as src:
+                src.write(content)
+                in_path = src.name
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as dst:
+                out_path = dst.name
+
+            result = subprocess.run(
+                [
+                    "ffmpeg",
+                    "-y",
+                    "-i",
+                    in_path,
+                    "-vn",
+                    "-codec:a",
+                    "libmp3lame",
+                    "-b:a",
+                    "128k",
+                    out_path,
+                ],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.PIPE,
+                timeout=30,
+            )
+            if result.returncode != 0:
+                print("ffmpeg mp3 conversion failed:", result.stderr.decode("utf-8", "ignore")[:1000])
+                return None
+            with open(out_path, "rb") as f:
+                return f.read()
+        except Exception as exc:
+            print("convert_audio_to_mp3 failed:", repr(exc))
+            return None
+        finally:
+            for path in (in_path, out_path):
+                if path:
+                    try:
+                        os.unlink(path)
+                    except Exception:
+                        pass
+
+
     async def send_deleted_media_copy(self, owner_id: int, lang: str, kind: str, file_id: str, caption: str | None = None) -> bool:
         """Send deleted media as reliably as possible.
 
@@ -2169,10 +2219,31 @@ class BotHandlers:
             except Exception as exc:
                 print(f"Direct binary upload fallback failed kind={kind}:", repr(exc))
 
-            # If Telegram blocks voice/audios even as document (VOICE_MESSAGES_FORBIDDEN),
-            # wrap the original file into ZIP. Telegram no longer treats it as a voice
-            # message, and the user still receives the deleted audio.
+            # Better UX for deleted voice: convert .ogg/opus to MP3 and send it as
+            # a normal Telegram audio track. This is much easier than opening ZIP.
             if kind in {"voice", "audio", "video_note"}:
+                mp3_bytes = self.convert_audio_to_mp3(content, "." + ext_map.get(kind, "ogg"))
+                if mp3_bytes:
+                    mp3_caption = (
+                        "🎙 Deleted voice converted to MP3."
+                        if lang == "en"
+                        else "🎙 Удалённое голосовое конвертировано в MP3."
+                        if lang == "ru"
+                        else "🎙 Видалене голосове конвертовано в MP3."
+                    )
+                    try:
+                        await self.bot.send_media_bytes(owner_id, "audio", f"ghostly_deleted_{kind}.mp3", mp3_bytes, mp3_caption)
+                        return True
+                    except Exception as exc:
+                        print(f"MP3 audio upload fallback failed kind={kind}:", repr(exc))
+                    try:
+                        await self.bot.send_media_bytes(owner_id, "document", f"ghostly_deleted_{kind}.mp3", mp3_bytes, mp3_caption)
+                        return True
+                    except Exception as exc:
+                        print(f"MP3 document upload fallback failed kind={kind}:", repr(exc))
+
+                # Last resort: wrap the original file into ZIP. Telegram no longer
+                # treats it as a voice message, and the user still receives the file.
                 zip_buffer = io.BytesIO()
                 inner_name = filename
                 with zipfile.ZipFile(zip_buffer, "w", compression=zipfile.ZIP_DEFLATED) as zf:
