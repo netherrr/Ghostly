@@ -75,6 +75,7 @@ class Database:
             features_en TEXT NOT NULL DEFAULT '',
             price_usd NUMERIC(12,2) NOT NULL,
             price_uah NUMERIC(12,0),
+            price_stars INT,
             duration_days INT NOT NULL,
             is_active BOOLEAN NOT NULL DEFAULT TRUE,
             position INT NOT NULL DEFAULT 100,
@@ -183,6 +184,7 @@ class Database:
         );
 
         ALTER TABLE plans ADD COLUMN IF NOT EXISTS price_uah NUMERIC(12,0);
+        ALTER TABLE plans ADD COLUMN IF NOT EXISTS price_stars INT;
         ALTER TABLE users ADD COLUMN IF NOT EXISTS referrer_id BIGINT REFERENCES users(tg_id) ON DELETE SET NULL;
         ALTER TABLE users ADD COLUMN IF NOT EXISTS referral_created_at TIMESTAMPTZ;
 
@@ -239,33 +241,33 @@ class Database:
 
             await con.execute(
                 """
-                INSERT INTO plans(code, name_uk, name_ru, name_en, features_uk, features_ru, features_en, price_usd, price_uah, duration_days, position, is_active)
+                INSERT INTO plans(code, name_uk, name_ru, name_en, features_uk, features_ru, features_en, price_usd, price_uah, price_stars, duration_days, position, is_active)
                 VALUES
                 ('pro_30', 'Pro на 1 місяць', 'Pro на 1 месяц', 'Pro 1 month',
                  '👻 Усі видалені повідомлення\n✏️ Історія редагувань\n🔎 Ключові слова\n🛡 Антискам-сповіщення\n🗄 Зберігання 30 днів',
                  '👻 Все удалённые сообщения\n✏️ История правок\n🔎 Ключевые слова\n🛡 Антискам-уведомления\n🗄 Хранение 30 дней',
                  '👻 All deleted messages\n✏️ Edit history\n🔎 Keywords\n🛡 Anti-scam alerts\n🗄 30-day storage',
-                 3.99, NULL, 30, 10, TRUE),
+                 3.99, NULL, 50, 30, 10, TRUE),
                 ('pro_90', 'Pro на 3 місяці', 'Pro на 3 месяца', 'Pro 3 months',
                  '👻 Усі видалені повідомлення\n✏️ Історія редагувань\n🔎 Ключові слова\n🛡 Антискам-сповіщення\n🔥 Вигідніше на 3 місяці',
                  '👻 Все удалённые сообщения\n✏️ История правок\n🔎 Ключевые слова\n🛡 Антискам-уведомления\n🔥 Выгоднее на 3 месяца',
                  '👻 All deleted messages\n✏️ Edit history\n🔎 Keywords\n🛡 Anti-scam alerts\n🔥 Better value for 3 months',
-                 9.99, NULL, 90, 20, TRUE),
+                 9.99, NULL, 125, 90, 20, TRUE),
                 ('pro_180', 'Pro на 6 місяців', 'Pro на 6 месяцев', 'Pro 6 months',
                  '👻 Усі видалені повідомлення\n✏️ Історія редагувань\n🔎 Ключові слова\n🛡 Антискам-сповіщення\n💎 Найкраще для постійного користування',
                  '👻 Все удалённые сообщения\n✏️ История правок\n🔎 Ключевые слова\n🛡 Антискам-уведомления\n💎 Лучший вариант для постоянного использования',
                  '👻 All deleted messages\n✏️ Edit history\n🔎 Keywords\n🛡 Anti-scam alerts\n💎 Best for regular use',
-                 17.99, NULL, 180, 30, TRUE),
+                 17.99, NULL, 200, 180, 30, TRUE),
                 ('pro_365', 'Pro на 1 рік', 'Pro на 1 год', 'Pro 1 year',
                  '👻 Усі видалені повідомлення\n✏️ Історія редагувань\n🔎 Ключові слова\n🛡 Антискам-сповіщення\n🏆 Максимальна вигода на рік',
                  '👻 Все удалённые сообщения\n✏️ История правок\n🔎 Ключевые слова\n🛡 Антискам-уведомления\n🏆 Максимальная выгода на год',
                  '👻 All deleted messages\n✏️ Edit history\n🔎 Keywords\n🛡 Anti-scam alerts\n🏆 Best yearly value',
-                 29.99, NULL, 365, 40, TRUE),
+                 29.99, NULL, 300, 365, 40, TRUE),
                 ('pro_lifetime', 'Pro назавжди', 'Pro навсегда', 'Pro lifetime',
                  '👻 Усі видалені повідомлення\n✏️ Історія редагувань\n🔎 Ключові слова\n🛡 Антискам-сповіщення\n♾ Безлімітний доступ',
                  '👻 Все удалённые сообщения\n✏️ История правок\n🔎 Ключевые слова\n🛡 Антискам-уведомления\n♾ Безлимитный доступ',
                  '👻 All deleted messages\n✏️ Edit history\n🔎 Keywords\n🛡 Anti-scam alerts\n♾ Lifetime access',
-                 79.99, NULL, 36500, 50, TRUE)
+                 79.99, NULL, 500, 36500, 50, TRUE)
                 ON CONFLICT(code) DO UPDATE SET
                     name_uk=EXCLUDED.name_uk,
                     name_ru=EXCLUDED.name_ru,
@@ -274,6 +276,7 @@ class Database:
                     features_ru=EXCLUDED.features_ru,
                     features_en=EXCLUDED.features_en,
                     duration_days=EXCLUDED.duration_days,
+                    price_stars=COALESCE(plans.price_stars, EXCLUDED.price_stars),
                     position=EXCLUDED.position,
                     is_active=TRUE,
                     updated_at=NOW()
@@ -284,6 +287,10 @@ class Database:
                 """
                 INSERT INTO payment_methods(code, title_uk, title_ru, title_en, instructions_uk, instructions_ru, instructions_en, details, position, is_active)
                 VALUES
+                ('telegram_stars', '⭐ Telegram Stars', '⭐ Telegram Stars', '⭐ Telegram Stars',
+                 'Оплата зірками Telegram. Натисни кнопку оплати, підтверди покупку — доступ активується автоматично.',
+                 'Оплата звёздами Telegram. Нажми кнопку оплаты, подтверди покупку — доступ активируется автоматически.',
+                 'Pay with Telegram Stars. Tap the payment button and confirm — access activates automatically.', '{}'::jsonb, 5, TRUE),
                 ('cryptobot', 'CryptoBot автоматично', 'CryptoBot автоматически', 'CryptoBot automatic',
                  'Натисни кнопку рахунку CryptoBot і оплати інвойс.',
                  'Нажми кнопку счёта CryptoBot и оплати инвойс.',
@@ -900,8 +907,8 @@ UQDbfUbzkI8lfO6G1KAPB_F2Et2IRTM4EvFhX5ATaXYrjoV3""",
             pos = await con.fetchval("SELECT COALESCE(MAX(position), 0) + 10 FROM plans")
             row = await con.fetchrow(
                 """
-                INSERT INTO plans(code, name_uk, name_ru, name_en, features_uk, features_ru, features_en, price_usd, price_uah, duration_days, position, is_active)
-                VALUES($1, $2, $2, $2, '', '', '', $3, NULL, $4, $5, TRUE)
+                INSERT INTO plans(code, name_uk, name_ru, name_en, features_uk, features_ru, features_en, price_usd, price_uah, price_stars, duration_days, position, is_active)
+                VALUES($1, $2, $2, $2, '', '', '', $3, NULL, NULL, $4, $5, TRUE)
                 RETURNING *
                 """,
                 clean_code, title, Decimal(str(price_usd)), int(duration_days), int(pos or 100),
@@ -909,7 +916,7 @@ UQDbfUbzkI8lfO6G1KAPB_F2Et2IRTM4EvFhX5ATaXYrjoV3""",
             return dict(row)
 
     async def update_plan_field(self, plan_id: int, field: str, value: str) -> None:
-        allowed = {"name_uk", "name_ru", "name_en", "features_uk", "features_ru", "features_en", "price_usd", "price_uah", "duration_days", "is_active", "position"}
+        allowed = {"name_uk", "name_ru", "name_en", "features_uk", "features_ru", "features_en", "price_usd", "price_uah", "price_stars", "duration_days", "is_active", "position"}
         if field not in allowed:
             raise ValueError(f"Unsupported plan field: {field}")
         parsed: Any = value
@@ -918,6 +925,9 @@ UQDbfUbzkI8lfO6G1KAPB_F2Et2IRTM4EvFhX5ATaXYrjoV3""",
         elif field == "price_uah":
             value_clean = value.strip().lower()
             parsed = None if value_clean in {"", "0", "null", "none", "auto", "авто"} else Decimal(value.replace(",", "."))
+        elif field == "price_stars":
+            value_clean = value.strip().lower()
+            parsed = None if value_clean in {"", "0", "null", "none", "auto", "авто"} else int(value)
         elif field in {"duration_days", "position"}:
             parsed = int(value)
         elif field == "is_active":
@@ -976,6 +986,11 @@ UQDbfUbzkI8lfO6G1KAPB_F2Et2IRTM4EvFhX5ATaXYrjoV3""",
     async def get_payment(self, payment_id: int) -> dict[str, Any] | None:
         async with self._pool().acquire() as con:
             row = await con.fetchrow("SELECT p.*, pl.duration_days FROM payments p LEFT JOIN plans pl ON p.plan_id=pl.id WHERE p.id=$1", payment_id)
+            return dict(row) if row else None
+
+    async def get_payment_by_external_id(self, external_id: str) -> dict[str, Any] | None:
+        async with self._pool().acquire() as con:
+            row = await con.fetchrow("SELECT p.*, pl.duration_days FROM payments p LEFT JOIN plans pl ON p.plan_id=pl.id WHERE p.external_id=$1", external_id)
             return dict(row) if row else None
 
     async def add_payment_proof(self, payment_id: int, proof: dict[str, Any]) -> dict[str, Any] | None:

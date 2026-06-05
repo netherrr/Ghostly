@@ -97,6 +97,22 @@ def plan_price_uah(plan: dict[str, Any] | None, uah_rate: Any = None) -> Decimal
     return None
 
 
+def plan_price_stars(plan: dict[str, Any] | None) -> int:
+    if not plan:
+        return 1
+    manual = plan.get("price_stars")
+    try:
+        if manual is not None and str(manual).strip() not in {"", "0", "0.00", "None", "null"}:
+            return max(1, int(Decimal(str(manual)).quantize(Decimal("1"))))
+    except Exception:
+        pass
+    # Fallback: roughly 50 Stars per 1 USD package. Admin can set exact values.
+    try:
+        return max(1, int((Decimal(str(plan.get("price_usd") or 0)) * Decimal("50")).quantize(Decimal("1"))))
+    except Exception:
+        return 1
+
+
 def amount_uah_line(amount: Decimal | None, lang: str) -> str:
     if amount is None:
         return ""
@@ -666,6 +682,8 @@ class BotHandlers:
                 await self.handle_message(update["message"])
             elif "callback_query" in update:
                 await self.handle_callback(update["callback_query"])
+            elif "pre_checkout_query" in update:
+                await self.handle_pre_checkout_query(update["pre_checkout_query"])
             elif "business_connection" in update:
                 await self.handle_business_connection(update["business_connection"])
             elif "business_message" in update:
@@ -688,6 +706,11 @@ class BotHandlers:
             return
         tg_id = int(user["tg_id"])
         lang = str(user.get("lang") or self.settings.default_lang)
+
+        if msg.get("successful_payment"):
+            await self.handle_stars_successful_payment(tg_id, lang, msg)
+            return
+
         text = (msg.get("text") or "").strip()
         is_admin = await self.db.is_admin(tg_id)
 
@@ -1511,6 +1534,31 @@ class BotHandlers:
         amount = Decimal(str(plan["price_usd"]))
         uah_rate = await self.db.get_setting("uah_rate", 42)
         amount_uah = plan_price_uah(plan, uah_rate)
+        if method_code == "telegram_stars":
+            try:
+                stars = plan_price_stars(plan)
+                payload = f"stars:{tg_id}:{plan_id}:{int(datetime.now(timezone.utc).timestamp())}"
+                payment = await self.db.create_payment(tg_id, plan_id, "telegram_stars", amount, currency="XTR", external_id=payload, raw={"stars": stars})
+                title = f"{self.settings.app_name} — {plan_name(plan, lang)}"
+                desc = (
+                    "Підписка активується автоматично після оплати зірками." if lang == "uk"
+                    else "Подписка активируется автоматически после оплаты звёздами." if lang == "ru"
+                    else "Your subscription activates automatically after paying with Stars."
+                )
+                await self.bot.send_stars_invoice(tg_id, title, desc, payload, stars)
+                hint = (
+                    f"⭐ <b>Рахунок у Telegram Stars створено.</b>\n\nДо сплати: <b>{stars} ⭐</b>\nПісля підтвердження доступ активується автоматично."
+                    if lang == "uk" else
+                    f"⭐ <b>Счёт в Telegram Stars создан.</b>\n\nК оплате: <b>{stars} ⭐</b>\nПосле подтверждения доступ активируется автоматически."
+                    if lang == "ru" else
+                    f"⭐ <b>Telegram Stars invoice created.</b>\n\nTo pay: <b>{stars} ⭐</b>\nAccess activates automatically after confirmation."
+                )
+                await self.bot.send_message(tg_id, hint, back_menu(lang, "plans"))
+            except Exception as exc:
+                print("Stars payment error:", repr(exc))
+                await self.bot.send_message(tg_id, tr(lang, "payment_error"), back_menu(lang))
+            return
+
         if method_code == "cryptobot":
             try:
                 invoice = await self.crypto.create_invoice(amount, f"{self.settings.app_name}: {plan_name(plan, 'en')}", f"user:{tg_id}:plan:{plan_id}")
@@ -1576,6 +1624,51 @@ class BotHandlers:
         except Exception as exc:
             print("Crypto check error:", repr(exc))
             await self.bot.send_message(tg_id, tr(lang, "payment_error"), back_menu(lang))
+
+    async def handle_pre_checkout_query(self, query: dict[str, Any]) -> None:
+        query_id = str(query.get("id") or "")
+        payload = str(query.get("invoice_payload") or "")
+        if not query_id:
+            return
+        try:
+            if payload.startswith("stars:"):
+                payment = await self.db.get_payment_by_external_id(payload)
+                if payment and payment.get("status") == "pending":
+                    await self.bot.answer_pre_checkout_query(query_id, True)
+                    return
+            await self.bot.answer_pre_checkout_query(query_id, False, "Payment session is outdated. Please create a new invoice.")
+        except Exception as exc:
+            print("PreCheckout error:", repr(exc))
+            try:
+                await self.bot.answer_pre_checkout_query(query_id, False, "Payment check failed. Please try again.")
+            except Exception:
+                pass
+
+    async def handle_stars_successful_payment(self, tg_id: int, lang: str, msg: dict[str, Any]) -> None:
+        sp = msg.get("successful_payment") or {}
+        payload = str(sp.get("invoice_payload") or "")
+        if not payload.startswith("stars:"):
+            return
+        payment = await self.db.get_payment_by_external_id(payload)
+        if not payment:
+            await self.bot.send_message(tg_id, tr(lang, "payment_error"), back_menu(lang))
+            return
+        raw = decode_json(payment.get("raw"), {}) or {}
+        if not isinstance(raw, dict):
+            raw = {"raw": raw}
+        raw["successful_payment"] = sp
+        raw["telegram_payment_charge_id"] = sp.get("telegram_payment_charge_id")
+        raw["total_amount"] = sp.get("total_amount")
+        raw["currency"] = sp.get("currency")
+        paid = await self.db.mark_payment_paid(int(payment["id"]), raw=raw)
+        text = (
+            f"✅ <b>Оплату зірками прийнято.</b>\n\nДоступ активовано до: <b>{e(dt(paid.get('paid_until') if paid else None))}</b>"
+            if lang == "uk" else
+            f"✅ <b>Оплата звёздами принята.</b>\n\nДоступ активирован до: <b>{e(dt(paid.get('paid_until') if paid else None))}</b>"
+            if lang == "ru" else
+            f"✅ <b>Stars payment received.</b>\n\nAccess active until: <b>{e(dt(paid.get('paid_until') if paid else None))}</b>"
+        )
+        await self.bot.send_message(tg_id, text, main_menu(lang, await self.db.is_admin(tg_id)))
 
     async def callback_manual_paid(self, tg_id: int, lang: str, payment_id: int) -> None:
         payment = await self.db.get_payment(payment_id)
@@ -1793,6 +1886,7 @@ class BotHandlers:
             f"💎 <b>Тариф #{p['id']} — {e(p['code'])}</b>\n\n"
             f"Статус: {'✅ активний' if p.get('is_active') else '⛔️ вимкнений'}\n"
             f"Ціна: <b>${e(p['price_usd'])}</b>\n"
+            f"Stars: <b>{e(plan_price_stars(p))} ⭐</b>\n"
             f"Тривалість: <b>{e(plan_duration_label(p.get('duration_days'), lang))}</b>\n"
             f"Позиція: <b>{e(p['position'])}</b>\n\n"
             f"🇺🇦 {e(p['name_uk'])}\n{e(p['features_uk'])}\n\n"

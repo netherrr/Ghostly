@@ -42,6 +42,7 @@ class BotAPI:
                 "allowed_updates": [
                     "message",
                     "callback_query",
+                    "pre_checkout_query",
                     "business_connection",
                     "business_message",
                     "edited_business_message",
@@ -52,6 +53,41 @@ class BotAPI:
 
     async def delete_webhook(self) -> dict[str, Any]:
         return await self.request("deleteWebhook", {"drop_pending_updates": False})
+
+    async def send_stars_invoice(
+        self,
+        chat_id: int | str,
+        title: str,
+        description: str,
+        payload: str,
+        amount_stars: int,
+        reply_markup: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Send a Telegram Stars invoice.
+
+        For Telegram Stars, currency must be XTR and provider_token must be omitted.
+        Amount is an integer number of Stars.
+        """
+        payload_data: dict[str, Any] = {
+            "chat_id": chat_id,
+            "title": title[:32],
+            "description": description[:255],
+            "payload": payload,
+            "currency": "XTR",
+            "prices": [{"label": title[:32], "amount": int(amount_stars)}],
+        }
+        if reply_markup:
+            payload_data["reply_markup"] = reply_markup
+        return await self.request("sendInvoice", payload_data)
+
+    async def answer_pre_checkout_query(self, pre_checkout_query_id: str, ok: bool = True, error_message: str | None = None) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "pre_checkout_query_id": pre_checkout_query_id,
+            "ok": bool(ok),
+        }
+        if error_message:
+            payload["error_message"] = error_message[:200]
+        return await self.request("answerPreCheckoutQuery", payload)
 
     async def send_message(
         self,

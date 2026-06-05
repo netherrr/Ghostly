@@ -136,6 +136,7 @@ def admin_plans_keyboard(lang: str, plans: list[dict[str, Any]]) -> dict[str, An
 def admin_plan_keyboard(lang: str, plan_id: int, is_active: bool) -> dict[str, Any]:
     return inline([
         [("💵 USD Price", f"adm_set_plan:{plan_id}:price_usd"), ("₴ UAH Price", f"adm_set_plan:{plan_id}:price_uah")],
+        [("⭐ Stars Price", f"adm_set_plan:{plan_id}:price_stars")],
         [("📆 Дні / Days", f"adm_set_plan:{plan_id}:duration_days")],
         [("↕️ Позиція", f"adm_set_plan:{plan_id}:position")],
         [("🇺🇦 Назва", f"adm_set_plan:{plan_id}:name_uk"), ("🏳️ Название", f"adm_set_plan:{plan_id}:name_ru"), ("🇬🇧 Name", f"adm_set_plan:{plan_id}:name_en")],
