@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import html
+import io
 import json
 import os
 import re
+import zipfile
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 from decimal import Decimal
@@ -2160,8 +2162,33 @@ class BotHandlers:
             if not file_path:
                 raise RuntimeError("Telegram returned empty file_path")
             content = await self.bot.download_file(file_path)
-            await self.bot.send_media_bytes(owner_id, fallback_kind, filename, content, caption)
-            return True
+
+            try:
+                await self.bot.send_media_bytes(owner_id, fallback_kind, filename, content, caption)
+                return True
+            except Exception as exc:
+                print(f"Direct binary upload fallback failed kind={kind}:", repr(exc))
+
+            # If Telegram blocks voice/audios even as document (VOICE_MESSAGES_FORBIDDEN),
+            # wrap the original file into ZIP. Telegram no longer treats it as a voice
+            # message, and the user still receives the deleted audio.
+            if kind in {"voice", "audio", "video_note"}:
+                zip_buffer = io.BytesIO()
+                inner_name = filename
+                with zipfile.ZipFile(zip_buffer, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+                    zf.writestr(inner_name, content)
+                zip_bytes = zip_buffer.getvalue()
+                zip_caption = (
+                    "🎙 Deleted voice saved inside ZIP. Open the archive and play the .ogg file."
+                    if lang == "en"
+                    else "🎙 Удалённое голосовое сохранено внутри ZIP. Открой архив и прослушай .ogg файл."
+                    if lang == "ru"
+                    else "🎙 Видалене голосове збережено всередині ZIP. Відкрий архів і прослухай .ogg файл."
+                )
+                await self.bot.send_media_bytes(owner_id, "document", f"{filename}.zip", zip_bytes, zip_caption)
+                return True
+
+            raise RuntimeError("All non-zip media fallbacks failed")
         except Exception as exc:
             print(f"Download/re-upload media fallback failed kind={kind}:", repr(exc))
             note = (
