@@ -247,27 +247,27 @@ class Database:
                  '👻 Усі видалені повідомлення\n✏️ Історія редагувань\n🔎 Ключові слова\n🛡 Антискам-сповіщення\n🗄 Зберігання 30 днів',
                  '👻 Все удалённые сообщения\n✏️ История правок\n🔎 Ключевые слова\n🛡 Антискам-уведомления\n🗄 Хранение 30 дней',
                  '👻 All deleted messages\n✏️ Edit history\n🔎 Keywords\n🛡 Anti-scam alerts\n🗄 30-day storage',
-                 3.99, NULL, 50, 30, 10, TRUE),
+                 3.99, NULL, 75, 30, 10, TRUE),
                 ('pro_90', 'Pro на 3 місяці', 'Pro на 3 месяца', 'Pro 3 months',
                  '👻 Усі видалені повідомлення\n✏️ Історія редагувань\n🔎 Ключові слова\n🛡 Антискам-сповіщення\n🔥 Вигідніше на 3 місяці',
                  '👻 Все удалённые сообщения\n✏️ История правок\n🔎 Ключевые слова\n🛡 Антискам-уведомления\n🔥 Выгоднее на 3 месяца',
                  '👻 All deleted messages\n✏️ Edit history\n🔎 Keywords\n🛡 Anti-scam alerts\n🔥 Better value for 3 months',
-                 9.99, NULL, 125, 90, 20, TRUE),
+                 9.99, NULL, 190, 90, 20, TRUE),
                 ('pro_180', 'Pro на 6 місяців', 'Pro на 6 месяцев', 'Pro 6 months',
                  '👻 Усі видалені повідомлення\n✏️ Історія редагувань\n🔎 Ключові слова\n🛡 Антискам-сповіщення\n💎 Найкраще для постійного користування',
                  '👻 Все удалённые сообщения\n✏️ История правок\n🔎 Ключевые слова\n🛡 Антискам-уведомления\n💎 Лучший вариант для постоянного использования',
                  '👻 All deleted messages\n✏️ Edit history\n🔎 Keywords\n🛡 Anti-scam alerts\n💎 Best for regular use',
-                 17.99, NULL, 200, 180, 30, TRUE),
+                 17.99, NULL, 300, 180, 30, TRUE),
                 ('pro_365', 'Pro на 1 рік', 'Pro на 1 год', 'Pro 1 year',
                  '👻 Усі видалені повідомлення\n✏️ Історія редагувань\n🔎 Ключові слова\n🛡 Антискам-сповіщення\n🏆 Максимальна вигода на рік',
                  '👻 Все удалённые сообщения\n✏️ История правок\n🔎 Ключевые слова\n🛡 Антискам-уведомления\n🏆 Максимальная выгода на год',
                  '👻 All deleted messages\n✏️ Edit history\n🔎 Keywords\n🛡 Anti-scam alerts\n🏆 Best yearly value',
-                 29.99, NULL, 300, 365, 40, TRUE),
+                 29.99, NULL, 450, 365, 40, TRUE),
                 ('pro_lifetime', 'Pro назавжди', 'Pro навсегда', 'Pro lifetime',
                  '👻 Усі видалені повідомлення\n✏️ Історія редагувань\n🔎 Ключові слова\n🛡 Антискам-сповіщення\n♾ Безлімітний доступ',
                  '👻 Все удалённые сообщения\n✏️ История правок\n🔎 Ключевые слова\n🛡 Антискам-уведомления\n♾ Безлимитный доступ',
                  '👻 All deleted messages\n✏️ Edit history\n🔎 Keywords\n🛡 Anti-scam alerts\n♾ Lifetime access',
-                 79.99, NULL, 500, 36500, 50, TRUE)
+                 79.99, NULL, 750, 36500, 50, TRUE)
                 ON CONFLICT(code) DO UPDATE SET
                     name_uk=EXCLUDED.name_uk,
                     name_ru=EXCLUDED.name_ru,
@@ -280,6 +280,28 @@ class Database:
                     position=EXCLUDED.position,
                     is_active=TRUE,
                     updated_at=NOW()
+                """
+            )
+
+            # One-time correction for old Stars defaults. This only changes values
+            # that match the earlier test defaults, so manual admin edits are not overwritten.
+            await con.execute(
+                """
+                UPDATE plans
+                   SET price_stars = CASE code
+                        WHEN 'pro_30' THEN 75
+                        WHEN 'pro_90' THEN 190
+                        WHEN 'pro_180' THEN 300
+                        WHEN 'pro_365' THEN 450
+                        WHEN 'pro_lifetime' THEN 750
+                        ELSE price_stars
+                   END,
+                   updated_at=NOW()
+                 WHERE (code='pro_30' AND (price_stars IS NULL OR price_stars IN (50, 90)))
+                    OR (code='pro_90' AND (price_stars IS NULL OR price_stars IN (125, 200, 230)))
+                    OR (code='pro_180' AND (price_stars IS NULL OR price_stars IN (200, 330, 370)))
+                    OR (code='pro_365' AND (price_stars IS NULL OR price_stars IN (300, 500, 550)))
+                    OR (code='pro_lifetime' AND (price_stars IS NULL OR price_stars IN (500, 800, 900)))
                 """
             )
 
