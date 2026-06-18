@@ -1336,12 +1336,64 @@ UQDbfUbzkI8lfO6G1KAPB_F2Et2IRTM4EvFhX5ATaXYrjoV3""",
                 json.dumps(raw),
                 delivered,
             )
-            await con.execute(
-                "UPDATE cached_messages SET deleted_at=NOW() WHERE business_connection_id=$1 AND chat_id=$2 AND message_id=$3",
+            if cached_id:
+                await con.execute(
+                    "UPDATE cached_messages SET deleted_at=NOW(), updated_at=NOW() WHERE id=$1",
+                    cached_id,
+                )
+            else:
+                await con.execute(
+                    "UPDATE cached_messages SET deleted_at=NOW(), updated_at=NOW() WHERE business_connection_id=$1 AND chat_id=$2 AND message_id=$3",
+                    bc_id,
+                    chat_id,
+                    message_id,
+                )
+
+
+    async def find_recent_cached_media_for_deleted_event(
+        self,
+        bc_id: str,
+        owner_id: int,
+        chat_id: int,
+        deleted_message_id: int | None = None,
+        minutes: int = 30,
+    ) -> dict[str, Any] | None:
+        """Fallback matcher for timer/disappearing media.
+
+        Some Telegram timer media can arrive as a normal business_message with one
+        message_id, then Telegram later sends deleted_business_messages with a
+        different/internal message_id. Exact lookup fails, but the media bytes were
+        already cached. In that case use the newest not-yet-delivered media from
+        the same business connection + chat.
+        """
+        async with self._pool().acquire() as con:
+            row = await con.fetchrow(
+                """
+                SELECT *
+                  FROM cached_messages
+                 WHERE business_connection_id=$1
+                   AND owner_tg_id=$2
+                   AND chat_id=$3
+                   AND deleted_at IS NULL
+                   AND content_type IN ('photo','video','animation','document','audio','voice','video_note','sticker')
+                   AND (file_bytes IS NOT NULL OR file_id IS NOT NULL)
+                   AND created_at >= NOW() - ($4::text || ' minutes')::interval
+                 ORDER BY
+                   CASE WHEN file_bytes IS NOT NULL THEN 0 ELSE 1 END,
+                   created_at DESC
+                 LIMIT 1
+                """,
                 bc_id,
+                owner_id,
                 chat_id,
-                message_id,
+                int(minutes),
             )
+            return dict(row) if row else None
+
+    async def mark_cached_message_deleted_by_id(self, cached_id: int) -> None:
+        async with self._pool().acquire() as con:
+            await con.execute("UPDATE cached_messages SET deleted_at=NOW(), updated_at=NOW() WHERE id=$1", int(cached_id))
+
 
     async def can_use_free_deleted(self, tg_id: int) -> bool:
         if await self.active_subscription(tg_id):

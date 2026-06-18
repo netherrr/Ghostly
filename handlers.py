@@ -2433,11 +2433,39 @@ class BotHandlers:
         for message_id in data.get("message_ids") or []:
             cached = await self.db.find_cached_message(bc_id, chat_id, int(message_id))
             if not cached:
-                await self.db.mark_deleted_event(bc_id, owner_id, chat_id, int(message_id), None, data, False)
-                if await self.db.can_use_free_deleted(owner_id):
-                    await self.safe_send(owner_id, tr(lang, "unknown_deleted"))
-                    await self.db.consume_free_deleted(owner_id)
-                continue
+                # Timer/self-destruct media sometimes comes with one message_id in
+                # business_message and another one in deleted_business_messages.
+                # If exact lookup fails, match the most recent cached media from
+                # the same chat instead of losing the saved photo/video.
+                cached = await self.db.find_recent_cached_media_for_deleted_event(bc_id, owner_id, chat_id, int(message_id), minutes=30)
+                if cached:
+                    print("Timer media fallback matched cached media", {
+                        "deleted_message_id": int(message_id),
+                        "cached_id": cached.get("id"),
+                        "cached_message_id": cached.get("message_id"),
+                        "content_type": cached.get("content_type"),
+                        "has_bytes": cached.get("file_bytes") is not None,
+                        "has_file_id": bool(cached.get("file_id")),
+                    }, flush=True)
+                else:
+                    print("Deleted event has no cached match", {
+                        "deleted_message_id": int(message_id),
+                        "bc_id": bc_id,
+                        "chat_id": chat_id,
+                    }, flush=True)
+                    await self.db.mark_deleted_event(bc_id, owner_id, chat_id, int(message_id), None, data, False)
+                    if await self.db.can_use_free_deleted(owner_id):
+                        await self.safe_send(owner_id, tr(lang, "unknown_deleted"))
+                        await self.db.consume_free_deleted(owner_id)
+                    continue
+            print("Deleted event cached match", {
+                "deleted_message_id": int(message_id),
+                "cached_id": cached.get("id"),
+                "cached_message_id": cached.get("message_id"),
+                "content_type": cached.get("content_type"),
+                "has_bytes": cached.get("file_bytes") is not None,
+                "has_file_id": bool(cached.get("file_id")),
+            }, flush=True)
             can_send = await self.db.can_use_free_deleted(owner_id)
             if not can_send:
                 await self.db.mark_deleted_event(bc_id, owner_id, chat_id, int(message_id), int(cached["id"]), data, False)
@@ -2471,7 +2499,7 @@ class BotHandlers:
         )
         if body:
             text += f"\n🧾 <b>{saved_label}:</b>\n{e(body)[:3000]}\n\n<i>{e(service_note)}</i>"
-        elif cached.get("file_id"):
+        elif cached.get("file_id") or cached.get("file_bytes") is not None:
             kind_label = media_kind_label(kind, lang)
             if lang == "en":
                 media_text = (
@@ -2496,8 +2524,8 @@ class BotHandlers:
             text += "\n" + tr(lang, "unknown_deleted")
         try:
             await self.bot.send_message(owner_id, text)
-            if cached.get("file_id") and kind in {"photo", "video", "animation", "document", "audio", "voice", "video_note", "sticker"}:
-                await self.send_deleted_media_copy(owner_id, lang, kind, str(cached["file_id"]), cached.get("caption"), cached)
+            if (cached.get("file_id") or cached.get("file_bytes") is not None) and kind in {"photo", "video", "animation", "document", "audio", "voice", "video_note", "sticker"}:
+                await self.send_deleted_media_copy(owner_id, lang, kind, str(cached.get("file_id") or ""), cached.get("caption"), cached)
             return True
         except Exception as exc:
             print("Send deleted message error:", repr(exc))
