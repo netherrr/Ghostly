@@ -16,7 +16,7 @@ from typing import Any
 from bot_api import BotAPI
 from config import Settings
 from crypto_pay import CryptoPayClient
-from db import Database, display_name, decode_json, media_object_from_message, media_filename, detect_disappearing_hint
+from db import Database, display_name, decode_json, extract_file_metadata
 from i18n import btn, tr
 from keyboards import (
     admin_menu,
@@ -54,8 +54,6 @@ except Exception:
     APP_TIMEZONE = timezone.utc
     APP_TIMEZONE_NAME = "UTC"
 
-
-MEDIA_CACHE_MAX_BYTES = int(os.getenv("MEDIA_CACHE_MAX_MB", "20")) * 1024 * 1024
 
 def dt(value: Any) -> str:
     if not value:
@@ -2178,24 +2176,136 @@ class BotHandlers:
         except Exception as exc:
             print("Business connection notify error:", repr(exc))
 
-    async def handle_business_message(self, msg: dict[str, Any]) -> None:
-        cached = await self.db.cache_business_message(msg)
+
+    def media_cache_max_bytes(self) -> int:
+        try:
+            return int(os.getenv("MEDIA_CACHE_MAX_BYTES", "25000000"))
+        except Exception:
+            return 25_000_000
+
+    async def cache_media_file_bytes_from_message(self, cached: dict[str, Any], msg: dict[str, Any]) -> None:
+        """Immediately download media bytes while Telegram still allows getFile.
+
+        This is important for disappearing/timer media: after Telegram removes it,
+        a normal file_id resend/getFile may fail. If Bot API provides file_id at
+        receive time, we save a small binary copy in PostgreSQL.
+        """
+        kind = str(cached.get("content_type") or "unknown")
+        file_id = cached.get("file_id")
+        cached_id = cached.get("id")
+        if not cached_id or not file_id:
+            # If timer media is hidden from Business Bot API, Telegram may send no
+            # file_id at all. Log raw keys so we can verify in Railway logs.
+            if kind in {"photo", "video", "voice", "video_note", "audio", "animation", "document", "sticker", "unknown"}:
+                print("Media cache skipped: no file_id", {"kind": kind, "message_id": msg.get("message_id"), "keys": sorted(list(msg.keys()))})
+            return
+        if kind not in {"photo", "video", "animation", "document", "audio", "voice", "video_note", "sticker"}:
+            return
+        if cached.get("file_bytes"):
+            return
+
+        file_name, declared_size, mime_type, is_disappearing = extract_file_metadata(msg)
+        max_bytes = self.media_cache_max_bytes()
+        try:
+            if declared_size and int(declared_size) > max_bytes:
+                print("Media cache skipped: file too large", {"kind": kind, "size": declared_size, "max": max_bytes})
+                return
+            info = await self.bot.get_file(str(file_id))
+            telegram_size = info.get("file_size")
+            if telegram_size and int(telegram_size) > max_bytes:
+                print("Media cache skipped: Telegram file too large", {"kind": kind, "size": telegram_size, "max": max_bytes})
+                return
+            file_path = str(info.get("file_path") or "")
+            if not file_path:
+                print("Media cache skipped: empty file_path", {"kind": kind, "file_id": str(file_id)[:20]})
+                return
+            content = await self.bot.download_file(file_path, max_bytes=max_bytes)
+            await self.db.set_cached_file_bytes(
+                int(cached_id),
+                content,
+                file_name=file_name,
+                file_size=len(content),
+                mime_type=mime_type,
+                is_disappearing=bool(is_disappearing),
+            )
+            print("Media cached bytes", {"kind": kind, "bytes": len(content), "message_id": msg.get("message_id"), "timer_hint": bool(is_disappearing)})
+        except Exception as exc:
+            print("Media cache bytes failed:", repr(exc), json.dumps({"kind": kind, "message_id": msg.get("message_id"), "keys": sorted(list(msg.keys()))}, ensure_ascii=False)[:1000])
+
+    def only_live_location_changed(self, old: dict[str, Any] | None, new: dict[str, Any], msg: dict[str, Any]) -> bool:
+        """Ignore live-location coordinate updates so the bot doesn't spam edit alerts."""
+        if not msg.get("location"):
+            return False
+        if str(new.get("content_type") or "") != "location":
+            return False
+        old_body = (old.get("text") or old.get("caption")) if old else None
+        new_body = new.get("text") or new.get("caption")
+        # For location messages our DB stores JSON in text. Telegram edits the
+        # coordinates every few seconds. Treat it as technical update, not content edit.
+        return True
+
+
+
+    async def maybe_send_disappearing_media_immediately(self, cached: dict[str, Any], msg: dict[str, Any]) -> None:
+        """If Telegram marks media as timer/self-destructing, save/show it immediately.
+
+        Some timer media may not emit deleted_business_messages later. Waiting for
+        deletion can therefore miss the moment. If Bot API exposes a timer hint,
+        we notify the owner right away after caching bytes.
+        """
         if not cached or not cached.get("owner_tg_id"):
             return
-        # Important for timer/disappearing media: download and store a small copy
-        # immediately. After the media disappears Telegram may invalidate file_id.
-        cached = await self.maybe_store_media_bytes(msg, cached)
+        _file_name, _file_size, _mime_type, is_disappearing = extract_file_metadata(msg)
+        if not is_disappearing:
+            return
+        kind = str(cached.get("content_type") or "unknown")
+        if kind not in {"photo", "video", "animation", "document", "audio", "voice", "video_note", "sticker"}:
+            return
         owner_id = int(cached["owner_tg_id"])
+        if not await self.db.can_use_free_deleted(owner_id):
+            lang = await self.user_lang(owner_id)
+            await self.safe_send(owner_id, tr(lang, "free_limit"), plans_keyboard(lang, await self.db.plans(True)))
+            return
         lang = await self.user_lang(owner_id)
+        refreshed = await self.db.find_cached_message(str(cached["business_connection_id"]), int(cached["chat_id"]), int(cached["message_id"]))
+        row = refreshed or cached
+        if lang == "en":
+            title = "🔥 <b>Disappearing media saved</b>"
+            note = "This media has a timer/self-destruct hint, so I saved it immediately."
+        elif lang == "ru":
+            title = "🔥 <b>Зникающее медиа сохранено</b>"
+            note = "У этого медиа есть таймер/самоуничтожение, поэтому я сохранил его сразу."
+        else:
+            title = "🔥 <b>Зникаюче медіа збережено</b>"
+            note = "У цього медіа є таймер/самознищення, тому я зберіг його одразу."
+        text = (
+            f"{title}\n\n"
+            f"💬 <b>{tr(lang, 'chat')}:</b> {e(row.get('chat_title') or row.get('chat_id'))}\n"
+            f"👤 <b>{tr(lang, 'from')}:</b> {e(row.get('sender_name') or row.get('sender_id'))}\n"
+            f"📎 <b>Type:</b> {e(media_kind_label(kind, lang))}\n\n"
+            f"{e(note)}"
+        )
+        await self.safe_send(owner_id, text)
+        if row.get("file_id") or row.get("file_bytes"):
+            delivered = await self.send_deleted_media_copy(owner_id, lang, kind, str(row.get("file_id") or ""), row.get("caption"), row)
+            if delivered:
+                await self.db.consume_free_deleted(owner_id)
 
-        if cached.get("is_disappearing") and cached.get("file_id") and await self.db.active_subscription(owner_id):
-            await self.send_disappearing_media_saved(owner_id, lang, cached)
 
+    async def handle_business_message(self, msg: dict[str, Any]) -> None:
+        cached = await self.db.cache_business_message(msg)
+        if cached:
+            await self.cache_media_file_bytes_from_message(cached, msg)
+            await self.maybe_send_disappearing_media_immediately(cached, msg)
+        if not cached or not cached.get("owner_tg_id"):
+            return
+        owner_id = int(cached["owner_tg_id"])
         body = cached.get("text") or cached.get("caption") or ""
         if not body:
             return
         if not await self.db.active_subscription(owner_id):
             return
+        lang = await self.user_lang(owner_id)
         matches = await self.db.match_keywords(owner_id, body)
         if matches:
             title = "🔎 <b>Keyword alert</b>" if lang == "en" else "🔎 <b>Оповещение по ключевому слову</b>" if lang == "ru" else "🔎 <b>Сповіщення за ключовим словом</b>"
@@ -2204,101 +2314,6 @@ class BotHandlers:
             title = "⚠️ <b>Possible scam/phishing</b>" if lang == "en" else "⚠️ <b>Возможный скам/фишинг</b>" if lang == "ru" else "⚠️ <b>Можливий скам/фішинг</b>"
             await self.safe_send(owner_id, f"{title}\n\n<b>{tr(lang, 'chat')}:</b> {e(cached.get('chat_title') or cached.get('chat_id'))}\n<b>{tr(lang, 'from')}:</b> {e(cached.get('sender_name') or cached.get('sender_id'))}\n\n{e(body)[:2500]}")
 
-
-    async def maybe_store_media_bytes(self, msg: dict[str, Any], cached: dict[str, Any]) -> dict[str, Any]:
-        """Download Telegram media immediately and store small files in DB.
-
-        This is the core fix for timer/disappearing media: after a timed media
-        expires, Telegram can reject the original file_id. A DB copy lets us still
-        return it later as mp3/file/zip.
-        """
-        kind = str(cached.get("content_type") or "")
-        file_id = cached.get("file_id")
-        cached_id = cached.get("id")
-        if not cached_id or not file_id or kind not in {"photo", "video", "animation", "document", "audio", "voice", "video_note", "sticker"}:
-            return cached
-        if cached.get("file_bytes"):
-            return cached
-
-        media = media_object_from_message(msg, kind)
-        declared_size = int(media.get("file_size") or 0)
-        if declared_size and declared_size > MEDIA_CACHE_MAX_BYTES:
-            print(f"Skip media byte cache: too large kind={kind}, size={declared_size}")
-            return cached
-
-        try:
-            file_info = await self.bot.get_file(str(file_id))
-            file_path = str(file_info.get("file_path") or "")
-            if not file_path:
-                return cached
-            content = await self.bot.download_file(file_path, max_bytes=MEDIA_CACHE_MAX_BYTES)
-            name = media_filename(kind, media, file_path)
-            mime_type = media.get("mime_type")
-            await self.db.update_cached_media_bytes(int(cached_id), content, name, len(content), mime_type)
-            cached = dict(cached)
-            cached["file_bytes"] = content
-            cached["file_name"] = name
-            cached["file_size"] = len(content)
-            cached["mime_type"] = mime_type
-            print(f"Cached media bytes kind={kind}, size={len(content)}, name={name}")
-            return cached
-        except Exception as exc:
-            print(f"maybe_store_media_bytes failed kind={kind}:", repr(exc))
-            return cached
-
-    def should_ignore_business_edit(self, old: dict[str, Any] | None, new: dict[str, Any], msg: dict[str, Any]) -> bool:
-        """Do not spam user for live geolocation coordinate updates and metadata-only updates."""
-        kind = str(new.get("content_type") or "")
-        old_kind = str((old or {}).get("content_type") or "")
-
-        if msg.get("location") or kind in {"location", "live_location", "venue"} or old_kind in {"location", "live_location", "venue"}:
-            return True
-
-        if kind in {"contact", "poll"} or old_kind in {"contact", "poll"}:
-            return True
-
-        # If there is no human-visible text/caption, this is usually a media/location
-        # metadata update, not a useful edit notification.
-        if not ((old or {}).get("text") or (old or {}).get("caption") or new.get("text") or new.get("caption")):
-            return True
-
-        return False
-
-    async def send_disappearing_media_saved(self, owner_id: int, lang: str, cached: dict[str, Any]) -> None:
-        """Instantly notify about self-destructing/timer media when Telegram exposes it.
-
-        Some timer media may not generate a normal deleted_business_messages update
-        after it disappears, so we send the saved copy immediately.
-        """
-        kind = str(cached.get("content_type") or "media")
-        kind_label = media_kind_label(kind, lang)
-        if lang == "en":
-            text = (
-                "🔥 <b>Disappearing media saved</b>\n\n"
-                f"📎 <b>Type:</b> {e(kind_label)}\n"
-                f"💬 <b>{tr(lang, 'chat')}:</b> {e(cached.get('chat_title') or cached.get('chat_id'))}\n"
-                f"👤 <b>{tr(lang, 'from')}:</b> {e(cached.get('sender_name') or cached.get('sender_id'))}\n\n"
-                "I detected timer/self-destruct media and saved a copy immediately."
-            )
-        elif lang == "ru":
-            text = (
-                "🔥 <b>Исчезающее медиа сохранено</b>\n\n"
-                f"📎 <b>Тип:</b> {e(kind_label)}\n"
-                f"💬 <b>{tr(lang, 'chat')}:</b> {e(cached.get('chat_title') or cached.get('chat_id'))}\n"
-                f"👤 <b>{tr(lang, 'from')}:</b> {e(cached.get('sender_name') or cached.get('sender_id'))}\n\n"
-                "Я увидел медиа с таймером/самоуничтожением и сразу сохранил копию."
-            )
-        else:
-            text = (
-                "🔥 <b>Зникаюче медіа збережено</b>\n\n"
-                f"📎 <b>Тип:</b> {e(kind_label)}\n"
-                f"💬 <b>{tr(lang, 'chat')}:</b> {e(cached.get('chat_title') or cached.get('chat_id'))}\n"
-                f"👤 <b>{tr(lang, 'from')}:</b> {e(cached.get('sender_name') or cached.get('sender_id'))}\n\n"
-                "Я побачив медіа з таймером/самознищенням і одразу зберіг копію."
-            )
-        await self.bot.send_message(owner_id, text)
-        await self.send_deleted_media_copy(owner_id, lang, kind, str(cached.get("file_id") or ""), cached.get("caption"), cached)
-
     async def handle_edited_business_message(self, msg: dict[str, Any]) -> None:
         bc_id = msg.get("business_connection_id")
         chat = msg.get("chat") or {}
@@ -2306,14 +2321,13 @@ class BotHandlers:
             return
         old = await self.db.find_cached_message(bc_id, int(chat["id"]), int(msg["message_id"]))
         new = await self.db.cache_edited_message(msg)
+        if new:
+            await self.cache_media_file_bytes_from_message(new, msg)
         if not new or not new.get("owner_tg_id"):
             return
-        new = await self.maybe_store_media_bytes(msg, new)
         owner_id = int(new["owner_tg_id"])
-
-        if self.should_ignore_business_edit(old, new, msg):
+        if self.only_live_location_changed(old, new, msg):
             return
-
         if old and (old.get("text") or old.get("caption")) == (new.get("text") or new.get("caption")):
             return
         if not await self.db.active_subscription(owner_id):
@@ -2384,7 +2398,7 @@ class BotHandlers:
         )
         if body:
             text += f"\n🧾 <b>{saved_label}:</b>\n{e(body)[:3000]}\n\n<i>{e(service_note)}</i>"
-        elif cached.get("file_id") or cached.get("file_bytes"):
+        elif cached.get("file_id"):
             kind_label = media_kind_label(kind, lang)
             if lang == "en":
                 media_text = (
@@ -2409,8 +2423,8 @@ class BotHandlers:
             text += "\n" + tr(lang, "unknown_deleted")
         try:
             await self.bot.send_message(owner_id, text)
-            if (cached.get("file_id") or cached.get("file_bytes")) and kind in {"photo", "video", "animation", "document", "audio", "voice", "video_note", "sticker"}:
-                await self.send_deleted_media_copy(owner_id, lang, kind, str(cached.get("file_id") or ""), cached.get("caption"), cached)
+            if cached.get("file_id") and kind in {"photo", "video", "animation", "document", "audio", "voice", "video_note", "sticker"}:
+                await self.send_deleted_media_copy(owner_id, lang, kind, str(cached["file_id"]), cached.get("caption"), cached)
             return True
         except Exception as exc:
             print("Send deleted message error:", repr(exc))
@@ -2471,12 +2485,51 @@ class BotHandlers:
         voice/video notes/stickers, Telegram can reject direct re-sending after the
         original message is deleted. Then we try getFile → download → upload again.
         """
-        if file_id:
+        cached_bytes: bytes | None = None
+        if cached and cached.get("file_bytes") is not None:
+            raw_bytes = cached.get("file_bytes")
             try:
-                await self.bot.send_cached_media(owner_id, kind, file_id, caption)
+                cached_bytes = bytes(raw_bytes)
+            except Exception:
+                cached_bytes = raw_bytes  # type: ignore[assignment]
+
+        if cached_bytes:
+            filename = str(cached.get("file_name") or f"ghostly_deleted_{kind}.bin")
+            try:
+                # For voice/video notes, sending as original type is often blocked.
+                # Start with a safe document/audio path from saved bytes.
+                if kind == "voice":
+                    # Try MP3 first for best UX.
+                    mp3_bytes = self.convert_audio_to_mp3(cached_bytes, ".ogg")
+                    if mp3_bytes:
+                        try:
+                            await self.bot.send_media_bytes(owner_id, "audio", "ghostly_deleted_voice.mp3", mp3_bytes, "🎙 Видалене голосове / Deleted voice")
+                            return True
+                        except Exception as exc:
+                            print("Saved-bytes MP3 audio send failed:", repr(exc))
+                        try:
+                            await self.bot.send_media_bytes(owner_id, "document", "ghostly_deleted_voice.mp3", mp3_bytes, "🎙 Видалене голосове / Deleted voice")
+                            return True
+                        except Exception as exc:
+                            print("Saved-bytes MP3 document send failed:", repr(exc))
+                    # Last resort ZIP from saved bytes.
+                    zip_buffer = io.BytesIO()
+                    with zipfile.ZipFile(zip_buffer, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+                        zf.writestr(filename if filename.endswith(".ogg") else "ghostly_deleted_voice.ogg", cached_bytes)
+                    await self.bot.send_media_bytes(owner_id, "document", "ghostly_deleted_voice.zip", zip_buffer.getvalue(), "🎙 Голосове збережено в ZIP / Voice saved in ZIP")
+                    return True
+
+                safe_kind = kind if kind in {"photo", "video", "animation", "audio", "document"} else "document"
+                await self.bot.send_media_bytes(owner_id, safe_kind, filename, cached_bytes, caption)
                 return True
             except Exception as exc:
-                print(f"Send cached media by file_id failed kind={kind}:", repr(exc))
+                print(f"Saved media bytes send failed kind={kind}:", repr(exc))
+
+        try:
+            await self.bot.send_cached_media(owner_id, kind, file_id, caption)
+            return True
+        except Exception as exc:
+            print(f"Send cached media by file_id failed kind={kind}:", repr(exc))
 
         # Some users/chats forbid voice messages from bots. In that case Telegram
         # returns VOICE_MESSAGES_FORBIDDEN. We must not retry sendVoice again:
@@ -2503,28 +2556,11 @@ class BotHandlers:
         }
         filename = f"ghostly_deleted_{kind}.{ext_map.get(kind, 'bin')}"
         try:
-            content: bytes | None = None
-            file_path = ""
-            if file_id:
-                try:
-                    file_info = await self.bot.get_file(file_id)
-                    file_path = str(file_info.get("file_path") or "")
-                    if not file_path:
-                        raise RuntimeError("Telegram returned empty file_path")
-                    content = await self.bot.download_file(file_path)
-                except Exception as exc:
-                    print(f"Fresh Telegram download failed kind={kind}:", repr(exc))
-
-            if content is None and cached and cached.get("file_bytes"):
-                try:
-                    content = bytes(cached["file_bytes"])
-                    filename = str(cached.get("file_name") or filename)
-                    print(f"Using DB cached media bytes kind={kind}, bytes={len(content)}")
-                except Exception as exc:
-                    print(f"Read cached file_bytes failed kind={kind}:", repr(exc))
-
-            if content is None:
-                raise RuntimeError("No media bytes available for deleted media fallback")
+            file_info = await self.bot.get_file(file_id)
+            file_path = str(file_info.get("file_path") or "")
+            if not file_path:
+                raise RuntimeError("Telegram returned empty file_path")
+            content = await self.bot.download_file(file_path)
 
             try:
                 await self.bot.send_media_bytes(owner_id, fallback_kind, filename, content, caption)
