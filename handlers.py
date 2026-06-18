@@ -2578,6 +2578,16 @@ class BotHandlers:
         cached = await self.db.cache_business_message(msg)
         if cached:
             await self.cache_media_file_bytes_from_message(cached, msg)
+            try:
+                refreshed_cached = await self.db.find_cached_message(
+                    str(cached.get("business_connection_id")),
+                    int(cached.get("chat_id")),
+                    int(cached.get("message_id")),
+                )
+                if refreshed_cached:
+                    cached = refreshed_cached
+            except Exception as exc:
+                print("Refresh cached after media bytes failed:", repr(exc), flush=True)
             await self.maybe_send_instant_media_backup(cached, msg)
             await self.maybe_send_disappearing_media_immediately(cached, msg)
         if not cached or not cached.get("owner_tg_id"):
@@ -2689,16 +2699,39 @@ class BotHandlers:
                             "has_file_id": bool(cached.get("file_id")),
                         }, flush=True)
                     else:
-                        print("Deleted event has no cached match", {
-                            "deleted_message_id": int(message_id),
-                            "bc_id": bc_id,
-                            "chat_id": chat_id,
-                        }, flush=True)
-                        await self.db.mark_deleted_event(bc_id, owner_id, chat_id, int(message_id), None, data, False)
-                        if await self.db.can_use_free_deleted(owner_id):
-                            await self.safe_send(owner_id, tr(lang, "unknown_deleted"))
-                            await self.db.consume_free_deleted(owner_id)
-                        continue
+                        # Ultra fallback: Telegram timer media sometimes deletes with
+                        # totally different internal ids. Search ANY recent cached
+                        # media for this owner, not only this chat/bc/message.
+                        try:
+                            cached = await self.db.find_any_recent_cached_media_for_owner(
+                                owner_id,
+                                minutes=int(os.getenv("TIMER_MEDIA_ULTRA_MATCH_MINUTES", "360")),
+                            )
+                        except Exception as exc:
+                            print("Ultra timer media matcher failed:", repr(exc), flush=True)
+                            cached = None
+
+                        if cached:
+                            print("Ultra timer media fallback matched cached media", {
+                                "deleted_message_id": int(message_id),
+                                "cached_id": cached.get("id"),
+                                "cached_message_id": cached.get("message_id"),
+                                "cached_chat_id": cached.get("chat_id"),
+                                "content_type": cached.get("content_type"),
+                                "has_bytes": cached.get("file_bytes") is not None,
+                                "has_file_id": bool(cached.get("file_id")),
+                            }, flush=True)
+                        else:
+                            print("Deleted event has no cached match", {
+                                "deleted_message_id": int(message_id),
+                                "bc_id": bc_id,
+                                "chat_id": chat_id,
+                            }, flush=True)
+                            await self.db.mark_deleted_event(bc_id, owner_id, chat_id, int(message_id), None, data, False)
+                            if await self.db.can_use_free_deleted(owner_id):
+                                await self.safe_send(owner_id, tr(lang, "unknown_deleted"))
+                                await self.db.consume_free_deleted(owner_id)
+                            continue
             print("Deleted event cached match", {
                 "deleted_message_id": int(message_id),
                 "cached_id": cached.get("id"),

@@ -1438,6 +1438,40 @@ UQDbfUbzkI8lfO6G1KAPB_F2Et2IRTM4EvFhX5ATaXYrjoV3""",
             return dict(row) if row else None
 
 
+
+    async def find_any_recent_cached_media_for_owner(
+        self,
+        owner_id: int,
+        minutes: int = 360,
+    ) -> dict[str, Any] | None:
+        """Ultra fallback for Telegram timer media.
+
+        Timer/self-destruct Business deletes can arrive with a different
+        business_connection_id/chat_id/message_id than the message that carried
+        the file. This searches by owner only and prefers media with saved bytes,
+        regardless of deleted_at, so tests don't fail after Telegram sends weird
+        identifiers.
+        """
+        async with self._pool().acquire() as con:
+            row = await con.fetchrow(
+                """
+                SELECT *
+                  FROM cached_messages
+                 WHERE owner_tg_id=$1
+                   AND content_type IN ('photo','video','animation','document','audio','voice','video_note','sticker')
+                   AND (file_bytes IS NOT NULL OR file_id IS NOT NULL)
+                   AND created_at >= NOW() - make_interval(mins => $2::int)
+                 ORDER BY
+                   CASE WHEN file_bytes IS NOT NULL THEN 0 ELSE 1 END,
+                   created_at DESC
+                 LIMIT 1
+                """,
+                owner_id,
+                int(minutes),
+            )
+            return dict(row) if row else None
+
+
     async def can_use_free_deleted(self, tg_id: int) -> bool:
         # Admins must always be able to test deleted/timer media without
         # silently hitting the free daily limit.
