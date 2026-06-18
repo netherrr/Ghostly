@@ -16,7 +16,7 @@ from typing import Any
 from bot_api import BotAPI
 from config import Settings
 from crypto_pay import CryptoPayClient
-from db import Database, display_name, decode_json, extract_file_metadata
+from db import Database, display_name, decode_json, extract_message_content, extract_file_metadata
 from i18n import btn, tr
 from keyboards import (
     admin_menu,
@@ -839,6 +839,116 @@ class BotHandlers:
         user = await self.db.get_user(tg_id)
         return str(user.get("lang") if user else self.settings.default_lang)
 
+
+    def message_has_media(self, msg: dict[str, Any]) -> bool:
+        return any(msg.get(k) for k in ("photo", "video", "animation", "document", "audio", "voice", "video_note", "sticker"))
+
+    async def handle_direct_media_backup_message(self, tg_id: int, lang: str, msg: dict[str, Any], is_admin: bool = False) -> bool:
+        """Backup media sent to the bot directly.
+
+        In Railway logs, some timer tests arrive as a normal `message` update,
+        not as `business_message`. The old code ignored such media and only
+        showed the menu. This handler saves/sends direct media immediately too.
+        """
+        if not self.message_has_media(msg):
+            return False
+
+        if not is_admin and not await self.db.active_subscription(tg_id):
+            await self.safe_send(
+                tg_id,
+                "🔒 <b>Медіа-бекап доступний у Pro.</b>\n\nПідключи Pro або Telegram Business, щоб Ghostly зберігав медіа автоматично."
+                if lang == "uk"
+                else "🔒 <b>Медиа-бэкап доступен в Pro.</b>\n\nПодключи Pro или Telegram Business, чтобы Ghostly сохранял медиа автоматически."
+                if lang == "ru"
+                else "🔒 <b>Media backup is available in Pro.</b>\n\nEnable Pro or Telegram Business so Ghostly can save media automatically.",
+                plans_keyboard(lang, await self.db.plans(True)),
+            )
+            return True
+
+        kind, _text, caption, file_id = extract_message_content(msg)
+        file_name, declared_size, mime_type, is_disappearing = extract_file_metadata(msg)
+        if not file_id:
+            print("Direct media backup skipped: no file_id", {"kind": kind, "message_id": msg.get("message_id"), "keys": sorted(list(msg.keys()))}, flush=True)
+            await self.safe_send(
+                tg_id,
+                "⚠️ Telegram не передав file_id для цього медіа, тому я не зміг його зберегти."
+                if lang == "uk"
+                else "⚠️ Telegram не передал file_id для этого медиа, поэтому я не смог его сохранить."
+                if lang == "ru"
+                else "⚠️ Telegram did not provide file_id for this media, so I could not save it.",
+            )
+            return True
+
+        max_bytes = self.media_cache_max_bytes()
+        try:
+            info = await self.bot.get_file(str(file_id))
+            size = info.get("file_size") or declared_size
+            if size and int(size) > max_bytes:
+                await self.safe_send(
+                    tg_id,
+                    f"⚠️ Файл занадто великий для бекапу: {int(size)} bytes."
+                    if lang == "uk"
+                    else f"⚠️ Файл слишком большой для бэкапа: {int(size)} bytes."
+                    if lang == "ru"
+                    else f"⚠️ File is too large for backup: {int(size)} bytes.",
+                )
+                return True
+            file_path = str(info.get("file_path") or "")
+            if not file_path:
+                raise RuntimeError("Telegram returned empty file_path")
+            content = await self.bot.download_file(file_path, max_bytes=max_bytes)
+
+            fake_cached = {
+                "id": 0,
+                "content_type": kind,
+                "file_id": file_id,
+                "file_bytes": content,
+                "file_name": file_name or f"ghostly_direct_{kind}.bin",
+                "file_size": len(content),
+                "mime_type": mime_type,
+                "caption": caption,
+                "chat_title": "Direct bot chat",
+                "chat_id": tg_id,
+                "sender_name": (msg.get("from") or {}).get("first_name") or tg_id,
+                "sender_id": tg_id,
+                "message_id": msg.get("message_id"),
+            }
+
+            title = (
+                "🔥 <b>Медіа одразу збережено</b>"
+                if lang == "uk"
+                else "🔥 <b>Медиа сразу сохранено</b>"
+                if lang == "ru"
+                else "🔥 <b>Media saved instantly</b>"
+            )
+            note = (
+                "Я отримав це як звичайне повідомлення в боті, тому одразу зробив копію."
+                if lang == "uk"
+                else "Я получил это как обычное сообщение в боте, поэтому сразу сделал копию."
+                if lang == "ru"
+                else "I received this as a direct bot message, so I backed it up immediately."
+            )
+            await self.safe_send(
+                tg_id,
+                f"{title}\n\n📎 <b>Тип:</b> {e(media_kind_label(kind, lang))}\n"
+                f"💾 <b>Розмір:</b> {len(content)} bytes\n\n{e(note)}"
+            )
+            delivered = await self.send_deleted_media_copy(tg_id, lang, kind, str(file_id), caption, fake_cached)
+            print("Direct media backup result", {"kind": kind, "bytes": len(content), "delivered": delivered, "timer_hint": bool(is_disappearing)}, flush=True)
+            return True
+        except Exception as exc:
+            print("Direct media backup failed:", repr(exc), {"kind": kind, "message_id": msg.get("message_id")}, flush=True)
+            await self.safe_send(
+                tg_id,
+                "⚠️ Не вийшло зберегти це медіа. Я записав помилку в Railway logs."
+                if lang == "uk"
+                else "⚠️ Не получилось сохранить это медиа. Я записал ошибку в Railway logs."
+                if lang == "ru"
+                else "⚠️ Could not save this media. I logged the error in Railway logs.",
+            )
+            return True
+
+
     async def handle_message(self, msg: dict[str, Any]) -> None:
         user_obj = msg.get("from") or {}
         user = await self.db.upsert_user(user_obj)
@@ -878,6 +988,10 @@ class BotHandlers:
                 await self.bot.send_message(tg_id, state_prompt(lang, state_name, state.get("payload") or {}), cancel_keyboard(lang, "admin" if is_admin else "menu"))
                 return
             await self.db.clear_state(tg_id)
+
+        if self.message_has_media(msg):
+            if await self.handle_direct_media_backup_message(tg_id, lang, msg, is_admin):
+                return
 
         if text.startswith("/start"):
             parts = text.split(maxsplit=1)
