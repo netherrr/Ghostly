@@ -2713,6 +2713,14 @@ class BotHandlers:
                 await self.safe_send(owner_id, tr(lang, "free_limit"), plans_keyboard(lang, await self.db.plans(True)))
                 continue
             delivered = await self.send_deleted_message(owner_id, lang, cached)
+            print("Deleted/timer event delivery result", {
+                "deleted_message_id": int(message_id),
+                "cached_id": cached.get("id"),
+                "content_type": cached.get("content_type"),
+                "has_bytes": cached.get("file_bytes") is not None,
+                "has_file_id": bool(cached.get("file_id")),
+                "delivered": delivered,
+            }, flush=True)
             await self.db.mark_deleted_event(bc_id, owner_id, chat_id, int(message_id), int(cached["id"]), data, delivered)
             if delivered:
                 await self.db.consume_free_deleted(owner_id)
@@ -2820,6 +2828,69 @@ class BotHandlers:
                         pass
 
 
+
+    async def send_saved_bytes_as_best_effort(
+        self,
+        owner_id: int,
+        lang: str,
+        kind: str,
+        filename: str,
+        content: bytes,
+        caption: str | None = None,
+    ) -> bool:
+        """Try hard to deliver saved media bytes.
+
+        For timer media the saved bytes are the most reliable source. Telegram can
+        reject one method (sendPhoto/sendVideo/sendAudio), so we also try sending
+        the same bytes as a regular document before falling back.
+        """
+        # Voice is special because users can forbid voice messages. MP3/ZIP already
+        # gives much better delivery.
+        if kind == "voice":
+            mp3_bytes = self.convert_audio_to_mp3(content, ".ogg")
+            if mp3_bytes:
+                for send_kind, fname in (("audio", "ghostly_deleted_voice.mp3"), ("document", "ghostly_deleted_voice.mp3")):
+                    try:
+                        await self.bot.send_media_bytes(owner_id, send_kind, fname, mp3_bytes, "🎙 Видалене голосове / Deleted voice")
+                        print("Saved voice delivered", {"mode": send_kind, "bytes": len(mp3_bytes)}, flush=True)
+                        return True
+                    except Exception as exc:
+                        print("Saved voice MP3 send failed:", repr(exc), {"mode": send_kind}, flush=True)
+
+            try:
+                zip_buffer = io.BytesIO()
+                with zipfile.ZipFile(zip_buffer, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+                    zf.writestr(filename if filename.endswith(".ogg") else "ghostly_deleted_voice.ogg", content)
+                await self.bot.send_media_bytes(owner_id, "document", "ghostly_deleted_voice.zip", zip_buffer.getvalue(), "🎙 Голосове збережено в ZIP / Voice saved in ZIP")
+                print("Saved voice delivered", {"mode": "zip", "bytes": len(content)}, flush=True)
+                return True
+            except Exception as exc:
+                print("Saved voice ZIP send failed:", repr(exc), flush=True)
+                return False
+
+        # video_note can be hard to re-send as a note; document/video are safer.
+        modes: list[tuple[str, str]] = []
+        if kind in {"photo", "video", "animation", "audio", "document"}:
+            modes.append((kind, filename))
+        if kind == "video_note":
+            modes.append(("video", filename if filename.endswith(".mp4") else "ghostly_deleted_video_note.mp4"))
+        modes.append(("document", filename or f"ghostly_deleted_{kind}.bin"))
+
+        tried = set()
+        for send_kind, fname in modes:
+            key = (send_kind, fname)
+            if key in tried:
+                continue
+            tried.add(key)
+            try:
+                await self.bot.send_media_bytes(owner_id, send_kind, fname, content, caption)
+                print("Saved media bytes delivered", {"kind": kind, "mode": send_kind, "bytes": len(content), "filename": fname}, flush=True)
+                return True
+            except Exception as exc:
+                print("Saved media bytes send mode failed:", repr(exc), {"kind": kind, "mode": send_kind, "filename": fname}, flush=True)
+        return False
+
+
     async def send_deleted_media_copy(self, owner_id: int, lang: str, kind: str, file_id: str, caption: str | None = None, cached: dict[str, Any] | None = None) -> bool:
         """Send deleted media as reliably as possible.
 
@@ -2837,35 +2908,9 @@ class BotHandlers:
 
         if cached_bytes:
             filename = str(cached.get("file_name") or f"ghostly_deleted_{kind}.bin")
-            try:
-                # For voice/video notes, sending as original type is often blocked.
-                # Start with a safe document/audio path from saved bytes.
-                if kind == "voice":
-                    # Try MP3 first for best UX.
-                    mp3_bytes = self.convert_audio_to_mp3(cached_bytes, ".ogg")
-                    if mp3_bytes:
-                        try:
-                            await self.bot.send_media_bytes(owner_id, "audio", "ghostly_deleted_voice.mp3", mp3_bytes, "🎙 Видалене голосове / Deleted voice")
-                            return True
-                        except Exception as exc:
-                            print("Saved-bytes MP3 audio send failed:", repr(exc))
-                        try:
-                            await self.bot.send_media_bytes(owner_id, "document", "ghostly_deleted_voice.mp3", mp3_bytes, "🎙 Видалене голосове / Deleted voice")
-                            return True
-                        except Exception as exc:
-                            print("Saved-bytes MP3 document send failed:", repr(exc))
-                    # Last resort ZIP from saved bytes.
-                    zip_buffer = io.BytesIO()
-                    with zipfile.ZipFile(zip_buffer, "w", compression=zipfile.ZIP_DEFLATED) as zf:
-                        zf.writestr(filename if filename.endswith(".ogg") else "ghostly_deleted_voice.ogg", cached_bytes)
-                    await self.bot.send_media_bytes(owner_id, "document", "ghostly_deleted_voice.zip", zip_buffer.getvalue(), "🎙 Голосове збережено в ZIP / Voice saved in ZIP")
-                    return True
-
-                safe_kind = kind if kind in {"photo", "video", "animation", "audio", "document"} else "document"
-                await self.bot.send_media_bytes(owner_id, safe_kind, filename, cached_bytes, caption)
+            if await self.send_saved_bytes_as_best_effort(owner_id, lang, kind, filename, cached_bytes, caption):
                 return True
-            except Exception as exc:
-                print(f"Saved media bytes send failed kind={kind}:", repr(exc))
+            print(f"All saved-bytes delivery modes failed kind={kind}; trying file_id fallback", flush=True)
 
         try:
             await self.bot.send_cached_media(owner_id, kind, file_id, caption)

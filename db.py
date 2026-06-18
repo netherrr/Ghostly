@@ -1439,6 +1439,13 @@ UQDbfUbzkI8lfO6G1KAPB_F2Et2IRTM4EvFhX5ATaXYrjoV3""",
 
 
     async def can_use_free_deleted(self, tg_id: int) -> bool:
+        # Admins must always be able to test deleted/timer media without
+        # silently hitting the free daily limit.
+        async with self._pool().acquire() as con:
+            admin_row = await con.fetchrow("SELECT is_admin FROM users WHERE tg_id=$1", tg_id)
+            if admin_row and bool(admin_row["is_admin"]):
+                return True
+
         if await self.active_subscription(tg_id):
             return True
         limit = await self.get_setting_int("free_deleted_limit_per_day", self.settings.free_deleted_limit_per_day)
@@ -1455,6 +1462,10 @@ UQDbfUbzkI8lfO6G1KAPB_F2Et2IRTM4EvFhX5ATaXYrjoV3""",
             return count < limit
 
     async def consume_free_deleted(self, tg_id: int) -> None:
+        async with self._pool().acquire() as con:
+            admin_row = await con.fetchrow("SELECT is_admin FROM users WHERE tg_id=$1", tg_id)
+            if admin_row and bool(admin_row["is_admin"]):
+                return
         if await self.active_subscription(tg_id):
             return
         today = date.today()
