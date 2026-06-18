@@ -2431,13 +2431,21 @@ class BotHandlers:
             return
         lang = await self.user_lang(owner_id)
         for message_id in data.get("message_ids") or []:
-            cached = await self.db.find_cached_message(bc_id, chat_id, int(message_id))
+            try:
+                cached = await self.db.find_cached_message(bc_id, chat_id, int(message_id))
+            except Exception as exc:
+                print("Deleted message exact lookup failed:", repr(exc), {"message_id": message_id, "chat_id": chat_id}, flush=True)
+                cached = None
             if not cached:
                 # Timer/self-destruct media sometimes comes with one message_id in
                 # business_message and another one in deleted_business_messages.
                 # If exact lookup fails, match the most recent cached media from
                 # the same chat instead of losing the saved photo/video.
-                cached = await self.db.find_recent_cached_media_for_deleted_event(bc_id, owner_id, chat_id, int(message_id), minutes=30)
+                try:
+                    cached = await self.db.find_recent_cached_media_for_deleted_event(bc_id, owner_id, chat_id, int(message_id), minutes=int(os.getenv('TIMER_MEDIA_MATCH_MINUTES', '120')))
+                except Exception as exc:
+                    print("Timer media fallback matcher failed:", repr(exc), {"deleted_message_id": int(message_id), "chat_id": chat_id}, flush=True)
+                    cached = None
                 if cached:
                     print("Timer media fallback matched cached media", {
                         "deleted_message_id": int(message_id),

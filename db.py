@@ -1377,7 +1377,7 @@ UQDbfUbzkI8lfO6G1KAPB_F2Et2IRTM4EvFhX5ATaXYrjoV3""",
                    AND deleted_at IS NULL
                    AND content_type IN ('photo','video','animation','document','audio','voice','video_note','sticker')
                    AND (file_bytes IS NOT NULL OR file_id IS NOT NULL)
-                   AND created_at >= NOW() - ($4::text || ' minutes')::interval
+                   AND created_at >= NOW() - make_interval(mins => $4::int)
                  ORDER BY
                    CASE WHEN file_bytes IS NOT NULL THEN 0 ELSE 1 END,
                    created_at DESC
