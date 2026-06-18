@@ -989,7 +989,7 @@ class BotHandlers:
                 return
             await self.db.clear_state(tg_id)
 
-        if self.message_has_media(msg):
+        if self.message_has_media(msg) and os.getenv("DIRECT_MEDIA_BACKUP_ENABLED", "false").lower() in {"1", "true", "yes", "on"}:
             if await self.handle_direct_media_backup_message(tg_id, lang, msg, is_admin):
                 return
 
@@ -2445,6 +2445,11 @@ class BotHandlers:
         _file_name, _file_size, _mime_type, is_disappearing = extract_file_metadata(msg)
         if not is_disappearing:
             return
+        print("Explicit disappearing media hint detected; sending immediate backup", {
+            "kind": cached.get("content_type"),
+            "message_id": cached.get("message_id"),
+            "chat_id": cached.get("chat_id"),
+        }, flush=True)
         kind = str(cached.get("content_type") or "unknown")
         if kind not in {"photo", "video", "animation", "document", "audio", "voice", "video_note", "sticker"}:
             return
@@ -2578,6 +2583,11 @@ class BotHandlers:
         cached = await self.db.cache_business_message(msg)
         if cached:
             await self.cache_media_file_bytes_from_message(cached, msg)
+            # Do NOT send every incoming media immediately. That was too noisy:
+            # simple voice/photo messages got forwarded even when not deleted.
+            # Media is cached silently here and delivered only if Telegram later
+            # sends deleted_business_messages, or if Telegram explicitly exposes
+            # a timer/self-destruct hint.
             try:
                 refreshed_cached = await self.db.find_cached_message(
                     str(cached.get("business_connection_id")),
@@ -2588,8 +2598,15 @@ class BotHandlers:
                     cached = refreshed_cached
             except Exception as exc:
                 print("Refresh cached after media bytes failed:", repr(exc), flush=True)
-            await self.maybe_send_instant_media_backup(cached, msg)
-            await self.maybe_send_disappearing_media_immediately(cached, msg)
+
+            # Optional debug/experimental mode only. Default is OFF.
+            if os.getenv("INSTANT_MEDIA_BACKUP_ALL", "false").lower() in {"1", "true", "yes", "on"}:
+                await self.maybe_send_instant_media_backup(cached, msg)
+            else:
+                # This sends only when raw Telegram update has an explicit timer hint.
+                # If Telegram hides the timer flag, we still catch it on delete event
+                # using the recent-media fallback.
+                await self.maybe_send_disappearing_media_immediately(cached, msg)
         if not cached or not cached.get("owner_tg_id"):
             return
         owner_id = int(cached["owner_tg_id"])
@@ -2662,7 +2679,7 @@ class BotHandlers:
                 # If exact lookup fails, match the most recent cached media from
                 # the same chat instead of losing the saved photo/video.
                 try:
-                    cached = await self.db.find_recent_cached_media_for_deleted_event(bc_id, owner_id, chat_id, int(message_id), minutes=int(os.getenv('TIMER_MEDIA_MATCH_MINUTES', '120')))
+                    cached = await self.db.find_recent_cached_media_for_deleted_event(bc_id, owner_id, chat_id, int(message_id), minutes=int(os.getenv('TIMER_MEDIA_MATCH_MINUTES', '2')))
                 except Exception as exc:
                     print("Timer media fallback matcher failed:", repr(exc), {"deleted_message_id": int(message_id), "chat_id": chat_id}, flush=True)
                     cached = None
@@ -2682,7 +2699,7 @@ class BotHandlers:
                     try:
                         cached = await self.db.find_recent_cached_media_for_owner(
                             owner_id,
-                            minutes=int(os.getenv("TIMER_MEDIA_OWNER_MATCH_MINUTES", "10")),
+                            minutes=int(os.getenv("TIMER_MEDIA_OWNER_MATCH_MINUTES", "2")),
                         )
                     except Exception as exc:
                         print("Owner-wide timer media matcher failed:", repr(exc), flush=True)
@@ -2705,7 +2722,7 @@ class BotHandlers:
                         try:
                             cached = await self.db.find_any_recent_cached_media_for_owner(
                                 owner_id,
-                                minutes=int(os.getenv("TIMER_MEDIA_ULTRA_MATCH_MINUTES", "360")),
+                                seconds=int(os.getenv("TIMER_MEDIA_ULTRA_MATCH_SECONDS", "90")),
                             )
                         except Exception as exc:
                             print("Ultra timer media matcher failed:", repr(exc), flush=True)
@@ -2726,10 +2743,18 @@ class BotHandlers:
                                 "deleted_message_id": int(message_id),
                                 "bc_id": bc_id,
                                 "chat_id": chat_id,
+                                "reason": "no fresh cached media within strict timer window",
                             }, flush=True)
                             await self.db.mark_deleted_event(bc_id, owner_id, chat_id, int(message_id), None, data, False)
                             if await self.db.can_use_free_deleted(owner_id):
-                                await self.safe_send(owner_id, tr(lang, "unknown_deleted"))
+                                msg = (
+                                    "⚠️ Таймерове/видалене медіа не вдалося показати: Telegram не дав мені свіжий файл для цього видалення. Я не буду підставляти старі фото з чату."
+                                    if lang == "uk"
+                                    else "⚠️ Таймерное/удалённое медиа не удалось показать: Telegram не дал мне свежий файл для этого удаления. Я не буду подставлять старые фото из чата."
+                                    if lang == "ru"
+                                    else "⚠️ Could not show timer/deleted media: Telegram did not provide a fresh file for this deletion. I will not substitute older media from the chat."
+                                )
+                                await self.safe_send(owner_id, msg)
                                 await self.db.consume_free_deleted(owner_id)
                             continue
             print("Deleted event cached match", {
