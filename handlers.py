@@ -39,6 +39,7 @@ from keyboards import (
     payment_methods_keyboard,
     plans_keyboard,
     referral_keyboard,
+    support_keyboard,
 )
 
 
@@ -69,6 +70,46 @@ def dt(value: Any) -> str:
         return local_value.strftime("%d.%m.%Y %H:%M") + f" ({label})"
     except Exception:
         return str(value)
+
+
+
+def media_kind_label(kind: str, lang: str) -> str:
+    labels = {
+        "uk": {
+            "photo": "фото",
+            "video": "відео",
+            "animation": "GIF",
+            "document": "файл",
+            "audio": "аудіо",
+            "voice": "голосове",
+            "video_note": "кружок",
+            "sticker": "стікер",
+            "unknown": "медіа",
+        },
+        "ru": {
+            "photo": "фото",
+            "video": "видео",
+            "animation": "GIF",
+            "document": "файл",
+            "audio": "аудио",
+            "voice": "голосовое",
+            "video_note": "кружок",
+            "sticker": "стикер",
+            "unknown": "медиа",
+        },
+        "en": {
+            "photo": "photo",
+            "video": "video",
+            "animation": "GIF",
+            "document": "file",
+            "audio": "audio",
+            "voice": "voice message",
+            "video_note": "video note",
+            "sticker": "sticker",
+            "unknown": "media",
+        },
+    }
+    return labels.get(lang, labels["en"]).get(kind, kind or labels.get(lang, labels["en"])["unknown"])
 
 
 def plan_name(plan: dict[str, Any] | None, lang: str) -> str:
@@ -656,6 +697,12 @@ def target_edit_mode(target: dict[str, Any] | None) -> str:
 
 
 def state_prompt(lang: str, state: str, payload: dict[str, Any]) -> str:
+    if state == "support_stars_amount":
+        return {
+            "uk": "⭐ Надішли кількість зірок, яку хочеш відправити. Наприклад: <code>100</code>",
+            "ru": "⭐ Отправь количество звёзд, которое хочешь отправить. Например: <code>100</code>",
+            "en": "⭐ Send the number of Stars you want to send. Example: <code>100</code>",
+        }.get(lang, "⭐ Send Stars amount")
     if state == "keyword_add":
         return {
             "uk": "🔎 Надішли ключове слово або фразу, яку треба відстежувати.",
@@ -775,6 +822,8 @@ class BotHandlers:
             await self.show_status(tg_id, lang)
         elif text in {"/plans"}:
             await self.show_plans(tg_id, lang)
+        elif text in {"/support", "/donate"}:
+            await self.show_support(tg_id, lang)
         elif text == "/keywords":
             await self.show_keywords(tg_id, lang)
         elif text.startswith("/add_keyword "):
@@ -993,6 +1042,16 @@ class BotHandlers:
                 await self.show_keywords(tg_id, lang)
                 return
 
+            if state == "support_stars_amount":
+                cleaned = text.strip().replace("⭐", "").replace(" ", "")
+                if not cleaned.isdigit():
+                    raise ValueError("Надішли тільки число, наприклад: 100")
+                stars = int(cleaned)
+                await self.validate_support_stars_amount(stars)
+                await self.db.clear_state(tg_id)
+                await self.create_support_stars_invoice(tg_id, lang, stars)
+                return
+
             if not is_admin:
                 await self.db.clear_state(tg_id)
                 await self.bot.send_message(tg_id, tr(lang, "not_admin"))
@@ -1071,6 +1130,79 @@ class BotHandlers:
             await self.send_template_screen(tg_id, tpl, main_menu(lang, is_admin))
             return
         await self.bot.send_message(tg_id, tr(lang, "start", app=e(self.settings.app_name)), main_menu(lang, is_admin))
+
+    def support_text(self, lang: str) -> str:
+        if lang == "ru":
+            return (
+                "⭐ <b>Поддержать проект</b>\n\n"
+                "Можно отправить любое количество Telegram Stars. "
+                "Оплата проходит прямо внутри Telegram и зачисляется на баланс бота.\n\n"
+                "Выбери быстрый вариант ниже или введи своё количество."
+            )
+        if lang == "en":
+            return (
+                "⭐ <b>Support the project</b>\n\n"
+                "You can send any amount of Telegram Stars. "
+                "The payment is processed directly inside Telegram and goes to the bot balance.\n\n"
+                "Choose a quick amount below or enter your own amount."
+            )
+        return (
+            "⭐ <b>Підтримати проект</b>\n\n"
+            "Можна відправити будь-яку кількість Telegram Stars. "
+            "Оплата проходить прямо в Telegram і зараховується на баланс бота.\n\n"
+            "Обери швидкий варіант нижче або введи свою кількість."
+        )
+
+    async def show_support(self, tg_id: int, lang: str, edit: tuple[int, int] | None = None) -> None:
+        await self._send_or_edit(tg_id, self.support_text(lang), support_keyboard(lang), edit)
+
+    async def validate_support_stars_amount(self, stars: int) -> None:
+        # Telegram accepts integer Stars. Keep a sane configurable range so users
+        # cannot accidentally create extreme invoices.
+        min_stars = int(await self.db.get_setting("support_stars_min", 1))
+        max_stars = int(await self.db.get_setting("support_stars_max", 2500))
+        if stars < min_stars:
+            raise ValueError(f"Minimum: {min_stars} Stars")
+        if stars > max_stars:
+            raise ValueError(f"Maximum: {max_stars} Stars")
+
+    async def create_support_stars_invoice(self, tg_id: int, lang: str, stars: int) -> None:
+        await self.validate_support_stars_amount(stars)
+        amount_usd = (Decimal(stars) * Decimal("0.013")).quantize(Decimal("0.01"))
+        payload = f"stars:support:{tg_id}:{stars}:{int(datetime.now(timezone.utc).timestamp() * 1000)}"
+        await self.db.create_payment(
+            tg_id,
+            None,
+            "stars_support",
+            amount_usd,
+            currency="XTR",
+            external_id=payload,
+            raw={"kind": "support", "stars": stars, "estimated_usd": str(amount_usd)},
+        )
+        title = (
+            f"{self.settings.app_name} — підтримка"
+            if lang == "uk" else
+            f"{self.settings.app_name} — поддержка"
+            if lang == "ru" else
+            f"{self.settings.app_name} — support"
+        )
+        desc = (
+            "Підтримка проекту Telegram Stars. Підписка не активується."
+            if lang == "uk" else
+            "Поддержка проекта Telegram Stars. Подписка не активируется."
+            if lang == "ru" else
+            "Telegram Stars project support. This does not activate a subscription."
+        )
+        await self.bot.send_stars_invoice(tg_id, title, desc, payload, stars)
+        hint = (
+            f"⭐ <b>Рахунок створено.</b>\n\nДо відправки: <b>{stars} ⭐</b>\nПісля підтвердження зірки зарахуються на баланс бота."
+            if lang == "uk" else
+            f"⭐ <b>Счёт создан.</b>\n\nК отправке: <b>{stars} ⭐</b>\nПосле подтверждения звёзды зачислятся на баланс бота."
+            if lang == "ru" else
+            f"⭐ <b>Invoice created.</b>\n\nTo send: <b>{stars} ⭐</b>\nAfter confirmation, Stars will be added to the bot balance."
+        )
+        await self.bot.send_message(tg_id, hint, back_menu(lang, "support"))
+
 
     async def show_menu_screen(self, tg_id: int, lang: str, is_admin: bool, edit: tuple[int, int] | None = None) -> None:
         tpl = await self.db.get_template(f"menu_{lang}")
@@ -1473,6 +1605,15 @@ class BotHandlers:
             await self.show_last_deleted(tg_id, lang, edit)
         elif data == "referrals":
             await self.show_referrals(tg_id, lang, edit)
+        elif data == "support":
+            await self.show_support(tg_id, lang, edit)
+        elif data == "support_custom":
+            await self.db.set_state(tg_id, "support_stars_amount", {})
+            await self._send_or_edit(tg_id, state_prompt(lang, "support_stars_amount", {}), back_menu(lang, "support"), edit)
+        elif data.startswith("support_amount:"):
+            stars = int(data.split(":", 1)[1])
+            await self.validate_support_stars_amount(stars)
+            await self.create_support_stars_invoice(tg_id, lang, stars)
         elif data == "keywords":
             await self.show_keywords(tg_id, lang, edit)
         elif data == "kw_add":
@@ -1680,6 +1821,32 @@ class BotHandlers:
         raw["telegram_payment_charge_id"] = sp.get("telegram_payment_charge_id")
         raw["total_amount"] = sp.get("total_amount")
         raw["currency"] = sp.get("currency")
+
+        if str(payment.get("provider") or "") == "stars_support":
+            paid = await self.db.mark_support_payment_paid(int(payment["id"]), raw=raw)
+            original_raw = decode_json(payment.get("raw"), {}) or {}
+            stars = int(sp.get("total_amount") or original_raw.get("stars") or 0)
+            text = (
+                f"✅ <b>Дякую за підтримку!</b>\n\nТи відправив: <b>{stars} ⭐</b>\nЗірки зараховані на баланс бота."
+                if lang == "uk" else
+                f"✅ <b>Спасибо за поддержку!</b>\n\nТы отправил: <b>{stars} ⭐</b>\nЗвёзды зачислены на баланс бота."
+                if lang == "ru" else
+                f"✅ <b>Thanks for supporting!</b>\n\nYou sent: <b>{stars} ⭐</b>\nStars were added to the bot balance."
+            )
+            await self.bot.send_message(tg_id, text, main_menu(lang, await self.db.is_admin(tg_id)))
+            user_obj = msg.get("from") or {}
+            username = ("@" + user_obj.get("username")) if user_obj.get("username") else ""
+            admin_text = (
+                "⭐ <b>Support Stars received</b>\n\n"
+                f"User: <code>{tg_id}</code> {e(username)}\n"
+                f"Amount: <b>{stars} ⭐</b>\n"
+                f"Payment ID: <code>{int(payment['id'])}</code>"
+            )
+            for admin_id in self.settings.admin_ids:
+                if int(admin_id) != int(tg_id):
+                    await self.safe_send(int(admin_id), admin_text)
+            return
+
         paid = await self.db.mark_payment_paid(int(payment["id"]), raw=raw)
         text = (
             f"✅ <b>Оплату зірками прийнято.</b>\n\nДоступ активовано до: <b>{e(dt(paid.get('paid_until') if paid else None))}</b>"
@@ -2109,7 +2276,26 @@ class BotHandlers:
         if body:
             text += f"\n🧾 <b>{saved_label}:</b>\n{e(body)[:3000]}\n\n<i>{e(service_note)}</i>"
         elif cached.get("file_id"):
-            text += "\n" + tr(lang, "media_saved", kind=e(kind))
+            kind_label = media_kind_label(kind, lang)
+            if lang == "en":
+                media_text = (
+                    f"🔥 <b>Deleted/disappearing media saved</b>\n"
+                    f"📎 <b>Type:</b> {e(kind_label)}\n"
+                    "I will send the saved file below. If Telegram blocks voice as a voice message, I will send it as MP3 or ZIP."
+                )
+            elif lang == "ru":
+                media_text = (
+                    f"🔥 <b>Сохранено удалённое/исчезающее медиа</b>\n"
+                    f"📎 <b>Тип:</b> {e(kind_label)}\n"
+                    "Я отправлю сохранённый файл ниже. Если Telegram заблокирует голосовое как voice, отправлю MP3 или ZIP."
+                )
+            else:
+                media_text = (
+                    f"🔥 <b>Збережено видалене/зникаюче медіа</b>\n"
+                    f"📎 <b>Тип:</b> {e(kind_label)}\n"
+                    "Я надішлю збережений файл нижче. Якщо Telegram заблокує голосове як voice, надішлю MP3 або ZIP."
+                )
+            text += "\n" + media_text
         else:
             text += "\n" + tr(lang, "unknown_deleted")
         try:

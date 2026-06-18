@@ -10,16 +10,40 @@ def inline(rows: list[list[tuple[str, str]]]) -> dict[str, Any]:
     return {"inline_keyboard": [[{"text": text, "callback_data": data} for text, data in row] for row in rows]}
 
 
+def support_button_text(lang: str) -> str:
+    return {
+        "uk": "⭐ Підтримати проект",
+        "ru": "⭐ Поддержать проект",
+        "en": "⭐ Support project",
+    }.get(lang, "⭐ Support project")
+
+
 def main_menu(lang: str, is_admin: bool = False) -> dict[str, Any]:
     rows = [
         [(btn(lang, "status"), "status"), (btn(lang, "plans"), "plans")],
         [(btn(lang, "connect"), "connect"), (btn(lang, "last_deleted"), "last_deleted")],
         [(btn(lang, "keywords"), "keywords"), (btn(lang, "privacy"), "privacy")],
         [(btn(lang, "referrals"), "referrals"), (btn(lang, "lang"), "lang")],
+        [(support_button_text(lang), "support")],
     ]
     if is_admin:
         rows.append([(btn(lang, "admin"), "admin")])
     return inline(rows)
+
+
+def support_keyboard(lang: str) -> dict[str, Any]:
+    custom = {
+        "uk": "✍️ Ввести свою кількість",
+        "ru": "✍️ Ввести своё количество",
+        "en": "✍️ Enter custom amount",
+    }.get(lang, "✍️ Enter custom amount")
+    return inline([
+        [("⭐ 50", "support_amount:50"), ("⭐ 100", "support_amount:100")],
+        [("⭐ 250", "support_amount:250"), ("⭐ 500", "support_amount:500")],
+        [("⭐ 1000", "support_amount:1000")],
+        [(custom, "support_custom")],
+        [(btn(lang, "back"), "menu")],
+    ])
 
 
 def lang_keyboard() -> dict[str, Any]:

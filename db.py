@@ -244,29 +244,29 @@ class Database:
                 INSERT INTO plans(code, name_uk, name_ru, name_en, features_uk, features_ru, features_en, price_usd, price_uah, price_stars, duration_days, position, is_active)
                 VALUES
                 ('pro_30', 'Pro на 1 місяць', 'Pro на 1 месяц', 'Pro 1 month',
-                 '👻 Усі видалені повідомлення\n✏️ Історія редагувань\n🔎 Ключові слова\n🛡 Антискам-сповіщення\n🗄 Зберігання 30 днів',
-                 '👻 Все удалённые сообщения\n✏️ История правок\n🔎 Ключевые слова\n🛡 Антискам-уведомления\n🗄 Хранение 30 дней',
-                 '👻 All deleted messages\n✏️ Edit history\n🔎 Keywords\n🛡 Anti-scam alerts\n🗄 30-day storage',
+                 '👻 Усі видалені повідомлення\n🔥 Зникаючі медіа: кружки/голосові/фото/відео\n✏️ Історія редагувань\n🔎 Ключові слова\n🛡 Антискам-сповіщення\n🗄 Зберігання 30 днів',
+                 '👻 Все удалённые сообщения\n🔥 Исчезающие медиа: кружки/голосовые/фото/видео\n✏️ История правок\n🔎 Ключевые слова\n🛡 Антискам-уведомления\n🗄 Хранение 30 дней',
+                 '👻 All deleted messages\n🔥 Disappearing media: video notes/voice/photos/videos\n✏️ Edit history\n🔎 Keywords\n🛡 Anti-scam alerts\n🗄 30-day storage',
                  3.99, NULL, 75, 30, 10, TRUE),
                 ('pro_90', 'Pro на 3 місяці', 'Pro на 3 месяца', 'Pro 3 months',
-                 '👻 Усі видалені повідомлення\n✏️ Історія редагувань\n🔎 Ключові слова\n🛡 Антискам-сповіщення\n🔥 Вигідніше на 3 місяці',
-                 '👻 Все удалённые сообщения\n✏️ История правок\n🔎 Ключевые слова\n🛡 Антискам-уведомления\n🔥 Выгоднее на 3 месяца',
-                 '👻 All deleted messages\n✏️ Edit history\n🔎 Keywords\n🛡 Anti-scam alerts\n🔥 Better value for 3 months',
+                 '👻 Усі видалені повідомлення\n🔥 Зникаючі медіа: кружки/голосові/фото/відео\n✏️ Історія редагувань\n🔎 Ключові слова\n🛡 Антискам-сповіщення\n🔥 Вигідніше на 3 місяці',
+                 '👻 Все удалённые сообщения\n🔥 Исчезающие медиа: кружки/голосовые/фото/видео\n✏️ История правок\n🔎 Ключевые слова\n🛡 Антискам-уведомления\n🔥 Выгоднее на 3 месяца',
+                 '👻 All deleted messages\n🔥 Disappearing media: video notes/voice/photos/videos\n✏️ Edit history\n🔎 Keywords\n🛡 Anti-scam alerts\n🔥 Better value for 3 months',
                  9.99, NULL, 190, 90, 20, TRUE),
                 ('pro_180', 'Pro на 6 місяців', 'Pro на 6 месяцев', 'Pro 6 months',
-                 '👻 Усі видалені повідомлення\n✏️ Історія редагувань\n🔎 Ключові слова\n🛡 Антискам-сповіщення\n💎 Найкраще для постійного користування',
-                 '👻 Все удалённые сообщения\n✏️ История правок\n🔎 Ключевые слова\n🛡 Антискам-уведомления\n💎 Лучший вариант для постоянного использования',
-                 '👻 All deleted messages\n✏️ Edit history\n🔎 Keywords\n🛡 Anti-scam alerts\n💎 Best for regular use',
+                 '👻 Усі видалені повідомлення\n🔥 Зникаючі медіа: кружки/голосові/фото/відео\n✏️ Історія редагувань\n🔎 Ключові слова\n🛡 Антискам-сповіщення\n💎 Найкраще для постійного користування',
+                 '👻 Все удалённые сообщения\n🔥 Исчезающие медиа: кружки/голосовые/фото/видео\n✏️ История правок\n🔎 Ключевые слова\n🛡 Антискам-уведомления\n💎 Лучший вариант для постоянного использования',
+                 '👻 All deleted messages\n🔥 Disappearing media: video notes/voice/photos/videos\n✏️ Edit history\n🔎 Keywords\n🛡 Anti-scam alerts\n💎 Best for regular use',
                  17.99, NULL, 300, 180, 30, TRUE),
                 ('pro_365', 'Pro на 1 рік', 'Pro на 1 год', 'Pro 1 year',
-                 '👻 Усі видалені повідомлення\n✏️ Історія редагувань\n🔎 Ключові слова\n🛡 Антискам-сповіщення\n🏆 Максимальна вигода на рік',
-                 '👻 Все удалённые сообщения\n✏️ История правок\n🔎 Ключевые слова\n🛡 Антискам-уведомления\n🏆 Максимальная выгода на год',
-                 '👻 All deleted messages\n✏️ Edit history\n🔎 Keywords\n🛡 Anti-scam alerts\n🏆 Best yearly value',
+                 '👻 Усі видалені повідомлення\n🔥 Зникаючі медіа: кружки/голосові/фото/відео\n✏️ Історія редагувань\n🔎 Ключові слова\n🛡 Антискам-сповіщення\n🏆 Максимальна вигода на рік',
+                 '👻 Все удалённые сообщения\n🔥 Исчезающие медиа: кружки/голосовые/фото/видео\n✏️ История правок\n🔎 Ключевые слова\n🛡 Антискам-уведомления\n🏆 Максимальная выгода на год',
+                 '👻 All deleted messages\n🔥 Disappearing media: video notes/voice/photos/videos\n✏️ Edit history\n🔎 Keywords\n🛡 Anti-scam alerts\n🏆 Best yearly value',
                  29.99, NULL, 450, 365, 40, TRUE),
                 ('pro_lifetime', 'Pro назавжди', 'Pro навсегда', 'Pro lifetime',
-                 '👻 Усі видалені повідомлення\n✏️ Історія редагувань\n🔎 Ключові слова\n🛡 Антискам-сповіщення\n♾ Безлімітний доступ',
-                 '👻 Все удалённые сообщения\n✏️ История правок\n🔎 Ключевые слова\n🛡 Антискам-уведомления\n♾ Безлимитный доступ',
-                 '👻 All deleted messages\n✏️ Edit history\n🔎 Keywords\n🛡 Anti-scam alerts\n♾ Lifetime access',
+                 '👻 Усі видалені повідомлення\n🔥 Зникаючі медіа: кружки/голосові/фото/відео\n✏️ Історія редагувань\n🔎 Ключові слова\n🛡 Антискам-сповіщення\n♾ Безлімітний доступ',
+                 '👻 Все удалённые сообщения\n🔥 Исчезающие медиа: кружки/голосовые/фото/видео\n✏️ История правок\n🔎 Ключевые слова\n🛡 Антискам-уведомления\n♾ Безлимитный доступ',
+                 '👻 All deleted messages\n🔥 Disappearing media: video notes/voice/photos/videos\n✏️ Edit history\n🔎 Keywords\n🛡 Anti-scam alerts\n♾ Lifetime access',
                  79.99, NULL, 750, 36500, 50, TRUE)
                 ON CONFLICT(code) DO UPDATE SET
                     name_uk=EXCLUDED.name_uk,
@@ -986,7 +986,7 @@ UQDbfUbzkI8lfO6G1KAPB_F2Et2IRTM4EvFhX5ATaXYrjoV3""",
         async with self._pool().acquire() as con:
             await con.execute(f"UPDATE payment_methods SET {field}=$2{cast}, updated_at=NOW() WHERE code=$1", code, parsed)
 
-    async def create_payment(self, user_id: int, plan_id: int, provider: str, amount_usd: Decimal | float | str, currency: str = "USD", external_id: str | None = None, invoice_url: str | None = None, raw: dict[str, Any] | None = None) -> dict[str, Any]:
+    async def create_payment(self, user_id: int, plan_id: int | None, provider: str, amount_usd: Decimal | float | str, currency: str = "USD", external_id: str | None = None, invoice_url: str | None = None, raw: dict[str, Any] | None = None) -> dict[str, Any]:
         async with self._pool().acquire() as con:
             row = await con.fetchrow(
                 """
@@ -1092,6 +1092,28 @@ UQDbfUbzkI8lfO6G1KAPB_F2Et2IRTM4EvFhX5ATaXYrjoV3""",
                 payment["status"] = "paid"
                 payment["paid_until"] = until
                 return payment
+
+    async def mark_support_payment_paid(self, payment_id: int, raw: dict[str, Any] | None = None) -> dict[str, Any] | None:
+        """Mark a Telegram Stars support payment as paid without granting subscription."""
+        async with self._pool().acquire() as con:
+            async with con.transaction():
+                row = await con.fetchrow("SELECT * FROM payments WHERE id=$1 FOR UPDATE", payment_id)
+                if not row:
+                    return None
+                payment = dict(row)
+                if payment["status"] == "paid":
+                    return payment
+                paid_raw = decode_json(payment.get("raw"), {}) or {}
+                if not isinstance(paid_raw, dict):
+                    paid_raw = {"raw": paid_raw}
+                if raw:
+                    paid_raw["paid_check"] = raw
+                updated = await con.fetchrow(
+                    "UPDATE payments SET status='paid', paid_at=NOW(), raw=$2::jsonb WHERE id=$1 RETURNING *",
+                    payment_id,
+                    json.dumps(paid_raw),
+                )
+                return dict(updated) if updated else None
 
     async def mark_payment_status(self, payment_id: int, status: str, admin_id: int | None = None, note: str | None = None) -> None:
         async with self._pool().acquire() as con:
