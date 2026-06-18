@@ -2365,10 +2365,106 @@ class BotHandlers:
                 await self.db.consume_free_deleted(owner_id)
 
 
+
+    async def maybe_send_instant_media_backup(self, cached: dict[str, Any], msg: dict[str, Any]) -> None:
+        """Send incoming media to the owner immediately.
+
+        Telegram does not reliably mark timer/self-destruct media in Business API
+        (`timer_hint` can be False), and deletion events can arrive with internal
+        ids. So the reliable product behavior is: if media comes through Business,
+        save it and instantly send a backup to the bot chat. This catches timer
+        media even if the user never opens it and even if no delete event arrives.
+        """
+        if not cached or not cached.get("owner_tg_id"):
+            return
+
+        kind = str(cached.get("content_type") or "unknown")
+        if kind not in {"photo", "video", "animation", "document", "audio", "voice", "video_note", "sticker"}:
+            return
+        if cached.get("media_backup_sent_at"):
+            return
+        if not (cached.get("file_id") or cached.get("file_bytes") is not None):
+            print("Instant media backup skipped: no file data", {
+                "kind": kind,
+                "message_id": cached.get("message_id"),
+                "chat_id": cached.get("chat_id"),
+            }, flush=True)
+            return
+
+        owner_id = int(cached["owner_tg_id"])
+        is_admin = await self.db.is_admin(owner_id)
+        # For normal users, keep this as a Pro feature. Admin can always test.
+        if not is_admin and not await self.db.active_subscription(owner_id):
+            return
+
+        lang = await self.user_lang(owner_id)
+        # Reload after cache_media_file_bytes_from_message, because `cached` may
+        # not contain file_bytes yet.
+        refreshed = await self.db.find_cached_message(
+            str(cached.get("business_connection_id")),
+            int(cached.get("chat_id")),
+            int(cached.get("message_id")),
+        )
+        row = refreshed or cached
+
+        if row.get("media_backup_sent_at"):
+            return
+        if not (row.get("file_id") or row.get("file_bytes") is not None):
+            return
+
+        if lang == "en":
+            title = "🔥 <b>Media backup saved</b>"
+            note = "I saved this media immediately, so timer/disappearing media will not be lost."
+            type_label = "Type"
+        elif lang == "ru":
+            title = "🔥 <b>Медиа сохранено</b>"
+            note = "Я сохранил это медиа сразу, поэтому таймеровые/исчезающие сообщения не потеряются."
+            type_label = "Тип"
+        else:
+            title = "🔥 <b>Медіа збережено</b>"
+            note = "Я зберіг це медіа одразу, тому таймерові/зникаючі повідомлення не загубляться."
+            type_label = "Тип"
+
+        text = (
+            f"{title}\n\n"
+            f"💬 <b>{tr(lang, 'chat')}:</b> {e(row.get('chat_title') or row.get('chat_id'))}\n"
+            f"👤 <b>{tr(lang, 'from')}:</b> {e(row.get('sender_name') or row.get('sender_id'))}\n"
+            f"📎 <b>{type_label}:</b> {e(media_kind_label(kind, lang))}\n\n"
+            f"{e(note)}"
+        )
+
+        try:
+            await self.safe_send(owner_id, text)
+            delivered = await self.send_deleted_media_copy(
+                owner_id,
+                lang,
+                kind,
+                str(row.get("file_id") or ""),
+                row.get("caption"),
+                row,
+            )
+            if delivered:
+                await self.db.mark_media_backup_sent(int(row["id"]))
+                print("Instant media backup sent", {
+                    "cached_id": row.get("id"),
+                    "kind": kind,
+                    "message_id": row.get("message_id"),
+                    "has_bytes": row.get("file_bytes") is not None,
+                    "has_file_id": bool(row.get("file_id")),
+                }, flush=True)
+        except Exception as exc:
+            print("Instant media backup failed:", repr(exc), {
+                "cached_id": row.get("id"),
+                "kind": kind,
+                "message_id": row.get("message_id"),
+            }, flush=True)
+
+
     async def handle_business_message(self, msg: dict[str, Any]) -> None:
         cached = await self.db.cache_business_message(msg)
         if cached:
             await self.cache_media_file_bytes_from_message(cached, msg)
+            await self.maybe_send_instant_media_backup(cached, msg)
             await self.maybe_send_disappearing_media_immediately(cached, msg)
         if not cached or not cached.get("owner_tg_id"):
             return
@@ -2456,16 +2552,39 @@ class BotHandlers:
                         "has_file_id": bool(cached.get("file_id")),
                     }, flush=True)
                 else:
-                    print("Deleted event has no cached match", {
-                        "deleted_message_id": int(message_id),
-                        "bc_id": bc_id,
-                        "chat_id": chat_id,
-                    }, flush=True)
-                    await self.db.mark_deleted_event(bc_id, owner_id, chat_id, int(message_id), None, data, False)
-                    if await self.db.can_use_free_deleted(owner_id):
-                        await self.safe_send(owner_id, tr(lang, "unknown_deleted"))
-                        await self.db.consume_free_deleted(owner_id)
-                    continue
+                    # Last resort: Telegram sometimes reports timer deletion under
+                    # another chat/internal id. If we already saved media for this
+                    # owner recently, use it instead of showing unknown_deleted.
+                    try:
+                        cached = await self.db.find_recent_cached_media_for_owner(
+                            owner_id,
+                            minutes=int(os.getenv("TIMER_MEDIA_OWNER_MATCH_MINUTES", "10")),
+                        )
+                    except Exception as exc:
+                        print("Owner-wide timer media matcher failed:", repr(exc), flush=True)
+                        cached = None
+
+                    if cached:
+                        print("Owner-wide timer media fallback matched cached media", {
+                            "deleted_message_id": int(message_id),
+                            "cached_id": cached.get("id"),
+                            "cached_message_id": cached.get("message_id"),
+                            "content_type": cached.get("content_type"),
+                            "chat_id": cached.get("chat_id"),
+                            "has_bytes": cached.get("file_bytes") is not None,
+                            "has_file_id": bool(cached.get("file_id")),
+                        }, flush=True)
+                    else:
+                        print("Deleted event has no cached match", {
+                            "deleted_message_id": int(message_id),
+                            "bc_id": bc_id,
+                            "chat_id": chat_id,
+                        }, flush=True)
+                        await self.db.mark_deleted_event(bc_id, owner_id, chat_id, int(message_id), None, data, False)
+                        if await self.db.can_use_free_deleted(owner_id):
+                            await self.safe_send(owner_id, tr(lang, "unknown_deleted"))
+                            await self.db.consume_free_deleted(owner_id)
+                        continue
             print("Deleted event cached match", {
                 "deleted_message_id": int(message_id),
                 "cached_id": cached.get("id"),

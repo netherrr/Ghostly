@@ -145,6 +145,7 @@ class Database:
             mime_type TEXT,
             is_disappearing BOOLEAN NOT NULL DEFAULT FALSE,
             file_cached_at TIMESTAMPTZ,
+            media_backup_sent_at TIMESTAMPTZ,
             media_group_id TEXT,
             edited_versions JSONB NOT NULL DEFAULT '[]'::jsonb,
             raw JSONB NOT NULL DEFAULT '{}'::jsonb,
@@ -226,6 +227,7 @@ class Database:
             await con.execute("ALTER TABLE cached_messages ADD COLUMN IF NOT EXISTS mime_type TEXT")
             await con.execute("ALTER TABLE cached_messages ADD COLUMN IF NOT EXISTS is_disappearing BOOLEAN NOT NULL DEFAULT FALSE")
             await con.execute("ALTER TABLE cached_messages ADD COLUMN IF NOT EXISTS file_cached_at TIMESTAMPTZ")
+            await con.execute("ALTER TABLE cached_messages ADD COLUMN IF NOT EXISTS media_backup_sent_at TIMESTAMPTZ")
 
     async def seed_defaults(self) -> None:
         async with self._pool().acquire() as con:
@@ -1393,6 +1395,47 @@ UQDbfUbzkI8lfO6G1KAPB_F2Et2IRTM4EvFhX5ATaXYrjoV3""",
     async def mark_cached_message_deleted_by_id(self, cached_id: int) -> None:
         async with self._pool().acquire() as con:
             await con.execute("UPDATE cached_messages SET deleted_at=NOW(), updated_at=NOW() WHERE id=$1", int(cached_id))
+
+
+
+    async def mark_media_backup_sent(self, cached_id: int) -> None:
+        async with self._pool().acquire() as con:
+            await con.execute(
+                "UPDATE cached_messages SET media_backup_sent_at=NOW(), updated_at=NOW() WHERE id=$1",
+                int(cached_id),
+            )
+
+    async def find_recent_cached_media_for_owner(
+        self,
+        owner_id: int,
+        minutes: int = 10,
+    ) -> dict[str, Any] | None:
+        """Last-resort timer media fallback.
+
+        If Telegram sends deleted_business_messages with a chat/message pair that
+        doesn't match the cached business_message, use the newest cached media for
+        this owner. This is intentionally a last resort and is mainly for timer
+        media where Telegram can use internal message ids.
+        """
+        async with self._pool().acquire() as con:
+            row = await con.fetchrow(
+                """
+                SELECT *
+                  FROM cached_messages
+                 WHERE owner_tg_id=$1
+                   AND deleted_at IS NULL
+                   AND content_type IN ('photo','video','animation','document','audio','voice','video_note','sticker')
+                   AND (file_bytes IS NOT NULL OR file_id IS NOT NULL)
+                   AND created_at >= NOW() - make_interval(mins => $2::int)
+                 ORDER BY
+                   CASE WHEN file_bytes IS NOT NULL THEN 0 ELSE 1 END,
+                   created_at DESC
+                 LIMIT 1
+                """,
+                owner_id,
+                int(minutes),
+            )
+            return dict(row) if row else None
 
 
     async def can_use_free_deleted(self, tg_id: int) -> bool:
