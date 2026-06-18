@@ -23,6 +23,74 @@ def decode_json(value: Any, default: Any = None) -> Any:
     return value
 
 
+def _walk_values(obj: Any):
+    """Yield nested key/value pairs from Telegram update JSON."""
+    if isinstance(obj, dict):
+        for k, v in obj.items():
+            yield k, v
+            yield from _walk_values(v)
+    elif isinstance(obj, list):
+        for item in obj:
+            yield from _walk_values(item)
+
+
+def detect_disappearing_hint(msg: dict[str, Any]) -> bool:
+    """Best-effort detection for self-destructing/timer media.
+
+    Bot API/Business updates may expose timer metadata differently depending on
+    Telegram version. We keep this intentionally broad and harmless: it only marks
+    a message as disappearing and lets the handler make an instant backup.
+    """
+    suspicious_keys = {
+        "ttl_seconds",
+        "ttl_period",
+        "self_destruct",
+        "self_destruct_type",
+        "self_destruct_period",
+        "self_destruct_seconds",
+        "auto_delete_timer",
+        "auto_delete_time",
+        "destroy_time",
+        "expires_at",
+    }
+    for key, value in _walk_values(msg):
+        key_l = str(key).lower()
+        if key_l in suspicious_keys and value not in (None, False, 0, "0", ""):
+            return True
+        if "ttl" in key_l and value not in (None, False, 0, "0", ""):
+            return True
+        if "self_destruct" in key_l and value not in (None, False, 0, "0", ""):
+            return True
+    return False
+
+
+def media_object_from_message(msg: dict[str, Any], kind: str) -> dict[str, Any]:
+    if kind == "photo":
+        photos = msg.get("photo") or []
+        return photos[-1] if photos else {}
+    data = msg.get(kind)
+    return data if isinstance(data, dict) else {}
+
+
+def media_filename(kind: str, media: dict[str, Any] | None = None, file_path: str | None = None) -> str:
+    media = media or {}
+    if media.get("file_name"):
+        return str(media["file_name"])[:180]
+    if file_path and "." in file_path.rsplit("/", 1)[-1]:
+        return file_path.rsplit("/", 1)[-1][:180]
+    ext_map = {
+        "photo": "jpg",
+        "video": "mp4",
+        "animation": "gif",
+        "audio": "mp3",
+        "voice": "ogg",
+        "video_note": "mp4",
+        "sticker": "webp",
+        "document": "bin",
+    }
+    return f"ghostly_saved_{kind}.{ext_map.get(kind, 'bin')}"
+
+
 class Database:
     def __init__(self, settings: Settings):
         self.settings = settings
@@ -139,6 +207,11 @@ class Database:
             text TEXT,
             caption TEXT,
             file_id TEXT,
+            file_bytes BYTEA,
+            file_name TEXT,
+            file_size BIGINT,
+            mime_type TEXT,
+            is_disappearing BOOLEAN NOT NULL DEFAULT FALSE,
             media_group_id TEXT,
             edited_versions JSONB NOT NULL DEFAULT '[]'::jsonb,
             raw JSONB NOT NULL DEFAULT '{}'::jsonb,
@@ -214,6 +287,12 @@ class Database:
         """
         async with self._pool().acquire() as con:
             await con.execute(sql)
+            # Safe migrations for existing Railway databases.
+            await con.execute("ALTER TABLE cached_messages ADD COLUMN IF NOT EXISTS file_bytes BYTEA")
+            await con.execute("ALTER TABLE cached_messages ADD COLUMN IF NOT EXISTS file_name TEXT")
+            await con.execute("ALTER TABLE cached_messages ADD COLUMN IF NOT EXISTS file_size BIGINT")
+            await con.execute("ALTER TABLE cached_messages ADD COLUMN IF NOT EXISTS mime_type TEXT")
+            await con.execute("ALTER TABLE cached_messages ADD COLUMN IF NOT EXISTS is_disappearing BOOLEAN NOT NULL DEFAULT FALSE")
 
     async def seed_defaults(self) -> None:
         async with self._pool().acquire() as con:
@@ -1181,12 +1260,13 @@ UQDbfUbzkI8lfO6G1KAPB_F2Et2IRTM4EvFhX5ATaXYrjoV3""",
                 """
                 INSERT INTO cached_messages(
                     business_connection_id, owner_tg_id, chat_id, message_id, sender_id, sender_name, chat_title,
-                    content_type, text, caption, file_id, media_group_id, raw
-                ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13::jsonb)
+                    content_type, text, caption, file_id, is_disappearing, media_group_id, raw
+                ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14::jsonb)
                 ON CONFLICT(business_connection_id, chat_id, message_id) DO UPDATE SET
                     text=EXCLUDED.text,
                     caption=EXCLUDED.caption,
                     file_id=EXCLUDED.file_id,
+                    is_disappearing=COALESCE(cached_messages.is_disappearing, FALSE) OR EXCLUDED.is_disappearing,
                     content_type=EXCLUDED.content_type,
                     raw=EXCLUDED.raw,
                     updated_at=NOW()
@@ -1203,6 +1283,7 @@ UQDbfUbzkI8lfO6G1KAPB_F2Et2IRTM4EvFhX5ATaXYrjoV3""",
                 text,
                 caption,
                 file_id,
+                detect_disappearing_hint(msg),
                 msg.get("media_group_id"),
                 json.dumps(msg),
             )
@@ -1221,6 +1302,7 @@ UQDbfUbzkI8lfO6G1KAPB_F2Et2IRTM4EvFhX5ATaXYrjoV3""",
             "text": text,
             "caption": caption,
             "file_id": file_id,
+            "is_disappearing": detect_disappearing_hint(msg),
         }
         async with self._pool().acquire() as con:
             row = await con.fetchrow(
@@ -1230,6 +1312,7 @@ UQDbfUbzkI8lfO6G1KAPB_F2Et2IRTM4EvFhX5ATaXYrjoV3""",
                     text=$5,
                     caption=$6,
                     file_id=COALESCE($7, file_id),
+                    is_disappearing=COALESCE(is_disappearing, FALSE) OR $10,
                     content_type=$8,
                     raw=$9::jsonb,
                     updated_at=NOW()
@@ -1245,10 +1328,37 @@ UQDbfUbzkI8lfO6G1KAPB_F2Et2IRTM4EvFhX5ATaXYrjoV3""",
                 file_id,
                 content_type,
                 json.dumps(msg),
+                detect_disappearing_hint(msg),
             )
             if row:
                 return dict(row)
         return await self.cache_business_message(msg)
+
+    async def update_cached_media_bytes(
+        self,
+        cached_id: int,
+        file_bytes: bytes,
+        file_name: str | None = None,
+        file_size: int | None = None,
+        mime_type: str | None = None,
+    ) -> None:
+        async with self._pool().acquire() as con:
+            await con.execute(
+                """
+                UPDATE cached_messages
+                   SET file_bytes=$2,
+                       file_name=$3,
+                       file_size=$4,
+                       mime_type=$5,
+                       updated_at=NOW()
+                 WHERE id=$1
+                """,
+                cached_id,
+                file_bytes,
+                file_name,
+                file_size,
+                mime_type,
+            )
 
     async def find_cached_message(self, bc_id: str, chat_id: int, message_id: int) -> dict[str, Any] | None:
         async with self._pool().acquire() as con:
@@ -1618,9 +1728,14 @@ def extract_message_content(msg: dict[str, Any]) -> tuple[str, str | None, str |
             data = msg[kind]
             return kind, None, msg.get("caption"), data.get("file_id")
     if msg.get("contact"):
-        return "contact", json.dumps(msg.get("contact"), ensure_ascii=False), None, None
+        # Contact/location/poll updates should not be treated like text edits.
+        return "contact", None, None, None
     if msg.get("location"):
-        return "location", json.dumps(msg.get("location"), ensure_ascii=False), None, None
+        loc = msg.get("location") or {}
+        kind = "live_location" if loc.get("live_period") or loc.get("heading") or loc.get("proximity_alert_radius") else "location"
+        return kind, None, None, None
+    if msg.get("venue"):
+        return "venue", None, None, None
     if msg.get("poll"):
-        return "poll", json.dumps(msg.get("poll"), ensure_ascii=False), None, None
+        return "poll", None, None, None
     return "unknown", msg.get("caption"), msg.get("caption"), None
