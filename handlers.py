@@ -743,7 +743,80 @@ class BotHandlers:
         self.bot = bot
         self.crypto = crypto
 
+
+    def debug_telegram_update(self, update: dict[str, Any]) -> None:
+        """Safe debug snapshot for Railway logs.
+
+        Does not print message text/captions, only update structure and media IDs presence.
+        Useful for checking whether Telegram sends timer/self-destruct media to Business bots at all.
+        """
+        try:
+            keys = sorted(list(update.keys()))
+            payload: dict[str, Any] = {"update_id": update.get("update_id"), "keys": keys}
+
+            msg = None
+            msg_key = None
+            for k in ("business_message", "edited_business_message", "message", "deleted_business_messages", "business_connection"):
+                if k in update:
+                    msg = update.get(k)
+                    msg_key = k
+                    break
+
+            payload["kind"] = msg_key
+            if isinstance(msg, dict):
+                payload["message_keys"] = sorted(list(msg.keys()))
+                payload["message_id"] = msg.get("message_id")
+                payload["business_connection_id"] = msg.get("business_connection_id")
+                chat = msg.get("chat") or {}
+                if isinstance(chat, dict):
+                    payload["chat_type"] = chat.get("type")
+                    payload["chat_id"] = chat.get("id")
+                if msg_key == "deleted_business_messages":
+                    payload["deleted_message_ids"] = msg.get("message_ids")
+                    payload["deleted_chat"] = (msg.get("chat") or {}).get("id") if isinstance(msg.get("chat"), dict) else None
+
+                media_summary = {}
+                for media_key in ("photo", "video", "animation", "document", "audio", "voice", "video_note", "sticker", "location"):
+                    if media_key in msg:
+                        data = msg.get(media_key)
+                        if media_key == "photo" and isinstance(data, list) and data:
+                            media_summary[media_key] = {
+                                "count": len(data),
+                                "last_has_file_id": bool((data[-1] or {}).get("file_id")),
+                                "last_file_size": (data[-1] or {}).get("file_size"),
+                            }
+                        elif isinstance(data, dict):
+                            media_summary[media_key] = {
+                                "has_file_id": bool(data.get("file_id")),
+                                "file_size": data.get("file_size"),
+                                "mime_type": data.get("mime_type"),
+                                "keys": sorted(list(data.keys())),
+                            }
+                        else:
+                            media_summary[media_key] = True
+                payload["media"] = media_summary
+
+                timer_keys = []
+                def scan_timer(obj: Any, prefix: str = "") -> None:
+                    if isinstance(obj, dict):
+                        for kk, vv in obj.items():
+                            low = str(kk).lower()
+                            if any(x in low for x in ("ttl", "self_destruct", "self-destruct", "expire", "expires", "timer")):
+                                timer_keys.append(prefix + str(kk))
+                            scan_timer(vv, prefix + str(kk) + ".")
+                    elif isinstance(obj, list):
+                        for idx, item in enumerate(obj[:5]):
+                            scan_timer(item, prefix + str(idx) + ".")
+                scan_timer(msg)
+                payload["timer_keys_found"] = timer_keys[:20]
+
+            print("GHOSTLY_DEBUG_UPDATE", json.dumps(payload, ensure_ascii=False), flush=True)
+        except Exception as exc:
+            print("GHOSTLY_DEBUG_UPDATE_FAILED", repr(exc), flush=True)
+
+
     async def handle_update(self, update: dict[str, Any]) -> None:
+        self.debug_telegram_update(update)
         try:
             if "message" in update:
                 await self.handle_message(update["message"])
@@ -2197,7 +2270,7 @@ class BotHandlers:
             # If timer media is hidden from Business Bot API, Telegram may send no
             # file_id at all. Log raw keys so we can verify in Railway logs.
             if kind in {"photo", "video", "voice", "video_note", "audio", "animation", "document", "sticker", "unknown"}:
-                print("Media cache skipped: no file_id", {"kind": kind, "message_id": msg.get("message_id"), "keys": sorted(list(msg.keys()))})
+                print("Media cache skipped: no file_id", {"kind": kind, "message_id": msg.get("message_id"), "keys": sorted(list(msg.keys()))}, flush=True)
             return
         if kind not in {"photo", "video", "animation", "document", "audio", "voice", "video_note", "sticker"}:
             return
@@ -2208,16 +2281,16 @@ class BotHandlers:
         max_bytes = self.media_cache_max_bytes()
         try:
             if declared_size and int(declared_size) > max_bytes:
-                print("Media cache skipped: file too large", {"kind": kind, "size": declared_size, "max": max_bytes})
+                print("Media cache skipped: file too large", {"kind": kind, "size": declared_size, "max": max_bytes}, flush=True)
                 return
             info = await self.bot.get_file(str(file_id))
             telegram_size = info.get("file_size")
             if telegram_size and int(telegram_size) > max_bytes:
-                print("Media cache skipped: Telegram file too large", {"kind": kind, "size": telegram_size, "max": max_bytes})
+                print("Media cache skipped: Telegram file too large", {"kind": kind, "size": telegram_size, "max": max_bytes}, flush=True)
                 return
             file_path = str(info.get("file_path") or "")
             if not file_path:
-                print("Media cache skipped: empty file_path", {"kind": kind, "file_id": str(file_id)[:20]})
+                print("Media cache skipped: empty file_path", {"kind": kind, "file_id": str(file_id)[:20]}, flush=True)
                 return
             content = await self.bot.download_file(file_path, max_bytes=max_bytes)
             await self.db.set_cached_file_bytes(
@@ -2228,9 +2301,9 @@ class BotHandlers:
                 mime_type=mime_type,
                 is_disappearing=bool(is_disappearing),
             )
-            print("Media cached bytes", {"kind": kind, "bytes": len(content), "message_id": msg.get("message_id"), "timer_hint": bool(is_disappearing)})
+            print("Media cached bytes", {"kind": kind, "bytes": len(content), "message_id": msg.get("message_id"), "timer_hint": bool(is_disappearing)}, flush=True)
         except Exception as exc:
-            print("Media cache bytes failed:", repr(exc), json.dumps({"kind": kind, "message_id": msg.get("message_id"), "keys": sorted(list(msg.keys()))}, ensure_ascii=False)[:1000])
+            print("Media cache bytes failed:", repr(exc), json.dumps({"kind": kind, "message_id": msg.get("message_id"), "keys": sorted(list(msg.keys()))}, ensure_ascii=False)[:1000], flush=True)
 
     def only_live_location_changed(self, old: dict[str, Any] | None, new: dict[str, Any], msg: dict[str, Any]) -> bool:
         """Ignore live-location coordinate updates so the bot doesn't spam edit alerts."""
