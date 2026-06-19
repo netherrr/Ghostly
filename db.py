@@ -232,6 +232,18 @@ class Database:
 
     async def seed_defaults(self) -> None:
         async with self._pool().acquire() as con:
+            # Timer-only professional fix: force current defaults even on old DBs
+            # that may contain previous false/debug values from earlier builds.
+            await con.execute(
+                """
+                INSERT INTO settings(key, value) VALUES
+                    ('timer_only_professional_fix_v1', 'true'::jsonb),
+                    ('timer_media_candidate_instant', 'true'::jsonb),
+                    ('timer_media_candidate_types', '["photo","video","video_note"]'::jsonb)
+                ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value, updated_at=NOW()
+                """
+            )
+
             # New public launch defaults: no Premium/Pro gate for core functions.
             await con.execute(
                 """
@@ -1878,7 +1890,31 @@ def extract_file_metadata(msg: dict[str, Any]) -> tuple[str | None, int | None, 
         if isinstance(value, dict):
             for key, val in value.items():
                 low = str(key).lower()
-                if any(marker in low for marker in ("ttl", "self_destruct", "self-destruct", "expire", "expires")):
+                # Bot API / MTProto clients may expose self-destruct media with
+                # different names depending on Telegram version. Keep this broad,
+                # but only as a hint; normal media is still filtered in handlers.
+                if any(marker in low for marker in (
+                    "ttl",
+                    "self_destruct",
+                    "self-destruct",
+                    "selfdestruct",
+                    "destruct",
+                    "disappear",
+                    "disappearing",
+                    "expire",
+                    "expires",
+                    "timer",
+                    "auto_delete",
+                    "autodelete",
+                )):
+                    return True
+                if isinstance(val, str) and any(marker in val.lower() for marker in (
+                    "self_destruct",
+                    "self-destruct",
+                    "disappear",
+                    "ttl",
+                    "timer",
+                )):
                     return True
                 if has_timer_hint(val):
                     return True

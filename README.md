@@ -274,3 +274,24 @@ This build is rebuilt for the newer Telegram Chat Automation / Chatbots flow:
 - Deleted media fallback uses strict short windows to avoid sending older wrong files.
 - Raw update logs are off by default. Enable with `GHOSTLY_DEBUG_UPDATES=true`.
 - Broad "send every media instantly" remains off unless `INSTANT_MEDIA_BACKUP_ALL=true`.
+
+
+## Timer-only professional fix
+
+This build forces the current timer-media defaults even on older databases:
+
+- `timer_media_candidate_instant=true`
+- `timer_media_candidate_types=["photo","video","video_note"]`
+
+Immediate sending is limited to timer-like `photo`, `video`, and `video_note` only.
+Voice/audio/documents/stickers are never sent immediately and are only shown after
+a deletion event.
+
+If Telegram exposes explicit ttl/self-destruct/timer fields, the bot uses them.
+If Telegram hides the flag, the fallback treats captionless photo/video/video_note
+as timer candidates so timer media is delivered immediately before expiry.
+
+Useful env toggles:
+- `TIMER_MEDIA_CAPTIONLESS_INSTANT=false` disables the fallback and uses only explicit timer hints.
+- `DIRECT_TIMER_MEDIA_ENABLED=false` disables direct-message timer handling.
+- `GHOSTLY_DEBUG_UPDATES=true` enables raw update diagnostics.

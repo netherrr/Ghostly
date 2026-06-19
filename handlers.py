@@ -951,6 +951,73 @@ class BotHandlers:
             return True
 
 
+
+    async def handle_direct_timer_media_message(self, tg_id: int, lang: str, msg: dict[str, Any], is_admin: bool = False) -> bool:
+        """Handle timer-like media if Telegram sends it as a normal message update.
+
+        This does not process voice/audio/documents/stickers and uses the same
+        timer-only detector as Business messages.
+        """
+        if os.getenv("DIRECT_TIMER_MEDIA_ENABLED", "true").lower() not in {"1", "true", "yes", "on"}:
+            return False
+        if not self.message_has_media(msg):
+            return False
+
+        kind, _text, caption, file_id = extract_message_content(msg)
+        if kind not in {"photo", "video", "video_note"}:
+            return False
+        if caption or msg.get("media_group_id"):
+            return False
+
+        fake_cached = {
+            "id": 0,
+            "owner_tg_id": tg_id,
+            "business_connection_id": "direct",
+            "chat_id": tg_id,
+            "message_id": int(msg.get("message_id") or 0),
+            "content_type": kind,
+            "file_id": file_id,
+            "caption": caption,
+            "chat_title": "Direct bot chat",
+            "sender_name": (msg.get("from") or {}).get("first_name") or tg_id,
+            "sender_id": tg_id,
+            "is_disappearing": self.raw_update_has_timer_hint(msg),
+            "media_backup_sent_at": None,
+        }
+        if not await self.is_timer_media_candidate(fake_cached, msg):
+            return False
+        if not file_id:
+            print("Direct timer media skipped: no file_id", {"kind": kind, "message_id": msg.get("message_id")}, flush=True)
+            return True
+
+        try:
+            file_name, declared_size, mime_type, _is_disappearing = extract_file_metadata(msg)
+            info = await self.bot.get_file(str(file_id))
+            file_path = str(info.get("file_path") or "")
+            if not file_path:
+                raise RuntimeError("Telegram returned empty file_path")
+            content = await self.bot.download_file(file_path, max_bytes=self.media_cache_max_bytes())
+            fake_cached.update({
+                "file_bytes": content,
+                "file_name": file_name or f"ghostly_timer_{kind}.bin",
+                "file_size": len(content),
+                "mime_type": mime_type,
+            })
+            if lang == "ru":
+                title = "🔥 <b>Таймерное медиа сохранено</b>"
+            elif lang == "en":
+                title = "🔥 <b>Timer media saved</b>"
+            else:
+                title = "🔥 <b>Таймерове медіа збережено</b>"
+            await self.safe_send(tg_id, f"{title}\n\n📎 <b>{'Тип' if lang != 'en' else 'Type'}:</b> {e(media_kind_label(kind, lang))}")
+            delivered = await self.send_deleted_media_copy(tg_id, lang, kind, str(file_id), caption, fake_cached)
+            print("Direct timer media delivery result", {"kind": kind, "bytes": len(content), "delivered": delivered}, flush=True)
+            return True
+        except Exception as exc:
+            print("Direct timer media failed:", repr(exc), {"kind": kind, "message_id": msg.get("message_id")}, flush=True)
+            return True
+
+
     async def handle_message(self, msg: dict[str, Any]) -> None:
         user_obj = msg.get("from") or {}
         user = await self.db.upsert_user(user_obj)
@@ -990,6 +1057,9 @@ class BotHandlers:
                 await self.bot.send_message(tg_id, state_prompt(lang, state_name, state.get("payload") or {}), cancel_keyboard(lang, "admin" if is_admin else "menu"))
                 return
             await self.db.clear_state(tg_id)
+
+        if await self.handle_direct_timer_media_message(tg_id, lang, msg, is_admin):
+            return
 
         if self.message_has_media(msg) and os.getenv("DIRECT_MEDIA_BACKUP_ENABLED", "false").lower() in {"1", "true", "yes", "on"}:
             if await self.handle_direct_media_backup_message(tg_id, lang, msg, is_admin):
@@ -2467,58 +2537,103 @@ class BotHandlers:
 
 
 
-    async def is_timer_media_candidate(self, cached: dict[str, Any], msg: dict[str, Any]) -> bool:
-        """Best-effort detector for timer/self-destruct media.
+    def raw_update_has_timer_hint(self, value: Any) -> bool:
+        """Detect explicit timer/self-destruct hints in raw Telegram update."""
+        if isinstance(value, dict):
+            for key, val in value.items():
+                low = str(key).lower()
+                if any(marker in low for marker in (
+                    "ttl",
+                    "self_destruct",
+                    "self-destruct",
+                    "selfdestruct",
+                    "destruct",
+                    "disappear",
+                    "disappearing",
+                    "expire",
+                    "expires",
+                    "timer",
+                    "auto_delete",
+                    "autodelete",
+                )):
+                    return True
+                if isinstance(val, str) and any(marker in val.lower() for marker in (
+                    "ttl", "timer", "self_destruct", "self-destruct", "disappear"
+                )):
+                    return True
+                if self.raw_update_has_timer_hint(val):
+                    return True
+        elif isinstance(value, list):
+            return any(self.raw_update_has_timer_hint(x) for x in value)
+        return False
 
-        Official updates do not always expose a clean timer flag. We therefore:
-        1) always trust explicit ttl/self_destruct/expire hints;
-        2) optionally treat captionless photo/video/video_note as timer candidates,
-           because Telegram timer media usually arrives as bare media.
-        This deliberately excludes voice/audio/documents so normal voice messages
-        are not forwarded immediately.
+    async def is_timer_media_candidate(self, cached: dict[str, Any], msg: dict[str, Any]) -> bool:
+        """Timer-only immediate delivery detector.
+
+        Telegram does not always expose a perfect `is_timer_media` flag to bots.
+        This function therefore uses two layers:
+        1) explicit raw timer/self-destruct/ttl hints => always timer;
+        2) fallback candidate mode => only captionless photo/video/video_note,
+           never voice/audio/document/sticker, never albums, never text/caption.
+
+        This keeps ordinary voice/docs from being sent instantly while still
+        catching the common disappearing photo/video cases.
         """
         if not cached:
             return False
+
         kind = str(cached.get("content_type") or "")
         if kind not in {"photo", "video", "video_note"}:
             return False
 
+        # Never instantly forward albums or media with captions/text. A normal
+        # photo/video with a caption is not treated as timer media.
+        if msg.get("caption") or msg.get("text") or msg.get("media_group_id"):
+            return False
+
         _file_name, _file_size, _mime_type, explicit_hint = extract_file_metadata(msg)
+        explicit_hint = bool(explicit_hint or self.raw_update_has_timer_hint(msg) or cached.get("is_disappearing"))
         if explicit_hint:
             return True
 
-        enabled = os.getenv("TIMER_MEDIA_CANDIDATE_INSTANT", "true").lower() in {"1", "true", "yes", "on"}
+        # Fallback for Telegram versions that hide the timer flag.
+        # Default ON because the product requirement is: timer photo/video must be
+        # sent immediately even before deletion/expiry. Disable if needed with:
+        # TIMER_MEDIA_CAPTIONLESS_INSTANT=false
+        fallback_enabled = os.getenv("TIMER_MEDIA_CAPTIONLESS_INSTANT", "true").lower() in {"1", "true", "yes", "on"}
+        if not fallback_enabled:
+            return False
+
+        # Optional hard override through DB settings. The rebuild seed forces it
+        # to true, but env false still wins above.
         try:
-            enabled = bool(await self.db.get_setting_bool("timer_media_candidate_instant", enabled))
+            db_enabled = await self.db.get_setting_bool("timer_media_candidate_instant", True)
+            if not db_enabled:
+                return False
         except Exception:
             pass
-        if not enabled:
-            return False
 
-        # Exclude normal media with captions/text. The heuristic is purposely
-        # conservative to avoid spamming regular media as much as possible.
-        if msg.get("caption") or msg.get("text"):
-            return False
-
-        # Optional per-kind setting from DB.
         try:
             allowed = await self.db.get_setting("timer_media_candidate_types", ["photo", "video", "video_note"])
             if isinstance(allowed, list) and kind not in {str(x) for x in allowed}:
                 return False
         except Exception:
             pass
+
         return True
 
     async def maybe_send_timer_media_candidate_immediately(self, cached: dict[str, Any], msg: dict[str, Any]) -> None:
-        """Immediately send likely timer media to the protected user's bot chat."""
+        """Immediately send timer-like media to the protected user's bot chat.
+
+        Important: this is NOT used for voice/audio/documents/stickers. Those are
+        cached silently and only sent if a deletion event comes later.
+        """
         if not cached or not cached.get("owner_tg_id"):
             return
         if not await self.is_timer_media_candidate(cached, msg):
             return
-        kind = str(cached.get("content_type") or "unknown")
-        if cached.get("media_backup_sent_at"):
-            return
 
+        kind = str(cached.get("content_type") or "unknown")
         owner_id = int(cached["owner_tg_id"])
         lang = await self.user_lang(owner_id)
 
@@ -2528,27 +2643,36 @@ class BotHandlers:
             int(cached.get("message_id")),
         )
         row = refreshed or cached
+
         if row.get("media_backup_sent_at"):
-            return
-        if not (row.get("file_id") or row.get("file_bytes") is not None):
-            print("Timer candidate skipped: no file data", {
-                "kind": kind,
+            print("Timer media instant skipped: already sent", {
+                "cached_id": row.get("id"),
                 "message_id": row.get("message_id"),
-                "chat_id": row.get("chat_id"),
+                "kind": kind,
             }, flush=True)
             return
 
+        if not (row.get("file_id") or row.get("file_bytes") is not None):
+            print("Timer media instant skipped: no file data", {
+                "cached_id": row.get("id"),
+                "kind": kind,
+                "message_id": row.get("message_id"),
+                "keys": sorted(list(msg.keys())),
+            }, flush=True)
+            return
+
+        explicit = bool(self.raw_update_has_timer_hint(msg) or row.get("is_disappearing"))
         if lang == "ru":
             title = "🔥 <b>Таймерное медиа сохранено</b>"
-            note = "Я получил медиа, похожее на таймерное, и сразу сохранил копию."
+            note = "Я сразу сохранил это медиа, не ожидая удаления или окончания таймера."
             type_label = "Тип"
         elif lang == "en":
             title = "🔥 <b>Timer media saved</b>"
-            note = "I received media that looks like timer/self-destruct media and saved a copy instantly."
+            note = "I saved this media immediately, without waiting for deletion or timer expiry."
             type_label = "Type"
         else:
             title = "🔥 <b>Таймерове медіа збережено</b>"
-            note = "Я отримав медіа, схоже на таймерове, і одразу зберіг копію."
+            note = "Я одразу зберіг це медіа, не чекаючи видалення або завершення таймера."
             type_label = "Тип"
 
         text = (
@@ -2558,28 +2682,35 @@ class BotHandlers:
             f"📎 <b>{type_label}:</b> {e(media_kind_label(kind, lang))}\n\n"
             f"{e(note)}"
         )
-        await self.safe_send(owner_id, text)
-        delivered = await self.send_deleted_media_copy(
-            owner_id,
-            lang,
-            kind,
-            str(row.get("file_id") or ""),
-            row.get("caption"),
-            row,
-        )
-        print("Timer candidate instant delivery", {
-            "kind": kind,
-            "cached_id": row.get("id"),
-            "message_id": row.get("message_id"),
-            "has_bytes": row.get("file_bytes") is not None,
-            "delivered": delivered,
-        }, flush=True)
-        if delivered:
-            try:
-                await self.db.mark_media_backup_sent(int(row["id"]))
-            except Exception as exc:
-                print("mark timer media sent failed:", repr(exc), flush=True)
 
+        try:
+            await self.safe_send(owner_id, text)
+            delivered = await self.send_deleted_media_copy(
+                owner_id,
+                lang,
+                kind,
+                str(row.get("file_id") or ""),
+                row.get("caption"),
+                row,
+            )
+            print("Timer media instant delivery result", {
+                "cached_id": row.get("id"),
+                "message_id": row.get("message_id"),
+                "kind": kind,
+                "explicit_hint": explicit,
+                "captionless_fallback": not explicit,
+                "has_bytes": row.get("file_bytes") is not None,
+                "has_file_id": bool(row.get("file_id")),
+                "delivered": delivered,
+            }, flush=True)
+            if delivered:
+                await self.db.mark_media_backup_sent(int(row["id"]))
+        except Exception as exc:
+            print("Timer media instant delivery failed:", repr(exc), {
+                "cached_id": row.get("id"),
+                "message_id": row.get("message_id"),
+                "kind": kind,
+            }, flush=True)
 
     async def maybe_send_disappearing_media_immediately(self, cached: dict[str, Any], msg: dict[str, Any]) -> None:
         """If Telegram marks media as timer/self-destructing, save/show it immediately.
