@@ -63,7 +63,7 @@ def load_settings() -> Settings:
         webhook_base_url=os.getenv("WEBHOOK_BASE_URL", "").strip() or None,
         webhook_secret=webhook_secret,
         port=int(os.getenv("PORT", "8080")),
-        app_name=os.getenv("APP_NAME", "ChatGuard").strip() or "ChatGuard",
+        app_name=os.getenv("APP_NAME", "Ghostly Guard").strip() or "Ghostly Guard",
         default_lang=os.getenv("DEFAULT_LANG", "uk").strip() or "uk",
         crypto_pay_token=os.getenv("CRYPTO_PAY_TOKEN", "").strip() or None,
         crypto_pay_api_url=os.getenv("CRYPTO_PAY_API_URL", "https://pay.crypt.bot/api").rstrip("/"),

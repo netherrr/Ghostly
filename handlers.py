@@ -4,6 +4,7 @@ import html
 import io
 import json
 import os
+from pathlib import Path
 import re
 import subprocess
 import tempfile
@@ -816,7 +817,8 @@ class BotHandlers:
 
 
     async def handle_update(self, update: dict[str, Any]) -> None:
-        self.debug_telegram_update(update)
+        if os.getenv("GHOSTLY_DEBUG_UPDATES", "false").lower() in {"1", "true", "yes", "on"}:
+            self.debug_telegram_update(update)
         try:
             if "message" in update:
                 await self.handle_message(update["message"])
@@ -1405,6 +1407,35 @@ class BotHandlers:
             return
         await self._send_or_edit(tg_id, tr(lang, "choose_lang"), lang_keyboard(), edit)
 
+
+    async def send_connect_card(self, tg_id: int, lang: str, edit: tuple[int, int] | None = None) -> bool:
+        try:
+            asset_path = Path(__file__).with_name("assets") / f"connect_{lang}.jpg"
+            if not asset_path.exists():
+                asset_path = Path(__file__).with_name("assets") / "connect_uk.jpg"
+            if not asset_path.exists():
+                return False
+            if edit:
+                chat_id, message_id = edit
+                try:
+                    await self.bot.delete_message(chat_id, message_id)
+                except Exception:
+                    pass
+            caption = tr(lang, "connect", app=e(self.settings.app_name))
+            await self.bot.send_media_bytes(
+                tg_id,
+                "photo",
+                asset_path.name,
+                asset_path.read_bytes(),
+                caption[:1024],
+                back_menu(lang),
+            )
+            return True
+        except Exception as exc:
+            print("send_connect_card failed:", repr(exc), flush=True)
+            return False
+
+
     async def show_connect(self, tg_id: int, lang: str, edit: tuple[int, int] | None = None) -> None:
         video_url = await self.db.get_setting("connect_video_url", "")
         uah_rate = await self.db.get_setting("uah_rate", 42)
@@ -1420,6 +1451,8 @@ class BotHandlers:
                 tpl["entities"] = []
             await self.send_template_screen(tg_id, tpl, back_menu(lang), edit)
         else:
+            if await self.send_connect_card(tg_id, lang, edit):
+                return
             text = tr(lang, "connect", app=e(self.settings.app_name))
             entities = None
             if video_url:
@@ -2433,6 +2466,121 @@ class BotHandlers:
 
 
 
+
+    async def is_timer_media_candidate(self, cached: dict[str, Any], msg: dict[str, Any]) -> bool:
+        """Best-effort detector for timer/self-destruct media.
+
+        Official updates do not always expose a clean timer flag. We therefore:
+        1) always trust explicit ttl/self_destruct/expire hints;
+        2) optionally treat captionless photo/video/video_note as timer candidates,
+           because Telegram timer media usually arrives as bare media.
+        This deliberately excludes voice/audio/documents so normal voice messages
+        are not forwarded immediately.
+        """
+        if not cached:
+            return False
+        kind = str(cached.get("content_type") or "")
+        if kind not in {"photo", "video", "video_note"}:
+            return False
+
+        _file_name, _file_size, _mime_type, explicit_hint = extract_file_metadata(msg)
+        if explicit_hint:
+            return True
+
+        enabled = os.getenv("TIMER_MEDIA_CANDIDATE_INSTANT", "true").lower() in {"1", "true", "yes", "on"}
+        try:
+            enabled = bool(await self.db.get_setting_bool("timer_media_candidate_instant", enabled))
+        except Exception:
+            pass
+        if not enabled:
+            return False
+
+        # Exclude normal media with captions/text. The heuristic is purposely
+        # conservative to avoid spamming regular media as much as possible.
+        if msg.get("caption") or msg.get("text"):
+            return False
+
+        # Optional per-kind setting from DB.
+        try:
+            allowed = await self.db.get_setting("timer_media_candidate_types", ["photo", "video", "video_note"])
+            if isinstance(allowed, list) and kind not in {str(x) for x in allowed}:
+                return False
+        except Exception:
+            pass
+        return True
+
+    async def maybe_send_timer_media_candidate_immediately(self, cached: dict[str, Any], msg: dict[str, Any]) -> None:
+        """Immediately send likely timer media to the protected user's bot chat."""
+        if not cached or not cached.get("owner_tg_id"):
+            return
+        if not await self.is_timer_media_candidate(cached, msg):
+            return
+        kind = str(cached.get("content_type") or "unknown")
+        if cached.get("media_backup_sent_at"):
+            return
+
+        owner_id = int(cached["owner_tg_id"])
+        lang = await self.user_lang(owner_id)
+
+        refreshed = await self.db.find_cached_message(
+            str(cached.get("business_connection_id")),
+            int(cached.get("chat_id")),
+            int(cached.get("message_id")),
+        )
+        row = refreshed or cached
+        if row.get("media_backup_sent_at"):
+            return
+        if not (row.get("file_id") or row.get("file_bytes") is not None):
+            print("Timer candidate skipped: no file data", {
+                "kind": kind,
+                "message_id": row.get("message_id"),
+                "chat_id": row.get("chat_id"),
+            }, flush=True)
+            return
+
+        if lang == "ru":
+            title = "🔥 <b>Таймерное медиа сохранено</b>"
+            note = "Я получил медиа, похожее на таймерное, и сразу сохранил копию."
+            type_label = "Тип"
+        elif lang == "en":
+            title = "🔥 <b>Timer media saved</b>"
+            note = "I received media that looks like timer/self-destruct media and saved a copy instantly."
+            type_label = "Type"
+        else:
+            title = "🔥 <b>Таймерове медіа збережено</b>"
+            note = "Я отримав медіа, схоже на таймерове, і одразу зберіг копію."
+            type_label = "Тип"
+
+        text = (
+            f"{title}\n\n"
+            f"💬 <b>{tr(lang, 'chat')}:</b> {e(row.get('chat_title') or row.get('chat_id'))}\n"
+            f"👤 <b>{tr(lang, 'from')}:</b> {e(row.get('sender_name') or row.get('sender_id'))}\n"
+            f"📎 <b>{type_label}:</b> {e(media_kind_label(kind, lang))}\n\n"
+            f"{e(note)}"
+        )
+        await self.safe_send(owner_id, text)
+        delivered = await self.send_deleted_media_copy(
+            owner_id,
+            lang,
+            kind,
+            str(row.get("file_id") or ""),
+            row.get("caption"),
+            row,
+        )
+        print("Timer candidate instant delivery", {
+            "kind": kind,
+            "cached_id": row.get("id"),
+            "message_id": row.get("message_id"),
+            "has_bytes": row.get("file_bytes") is not None,
+            "delivered": delivered,
+        }, flush=True)
+        if delivered:
+            try:
+                await self.db.mark_media_backup_sent(int(row["id"]))
+            except Exception as exc:
+                print("mark timer media sent failed:", repr(exc), flush=True)
+
+
     async def maybe_send_disappearing_media_immediately(self, cached: dict[str, Any], msg: dict[str, Any]) -> None:
         """If Telegram marks media as timer/self-destructing, save/show it immediately.
 
@@ -2583,11 +2731,6 @@ class BotHandlers:
         cached = await self.db.cache_business_message(msg)
         if cached:
             await self.cache_media_file_bytes_from_message(cached, msg)
-            # Do NOT send every incoming media immediately. That was too noisy:
-            # simple voice/photo messages got forwarded even when not deleted.
-            # Media is cached silently here and delivered only if Telegram later
-            # sends deleted_business_messages, or if Telegram explicitly exposes
-            # a timer/self-destruct hint.
             try:
                 refreshed_cached = await self.db.find_cached_message(
                     str(cached.get("business_connection_id")),
@@ -2599,21 +2742,20 @@ class BotHandlers:
             except Exception as exc:
                 print("Refresh cached after media bytes failed:", repr(exc), flush=True)
 
-            # Optional debug/experimental mode only. Default is OFF.
+            # Timer media must be shown immediately when possible. We only do this
+            # for likely timer photo/video/video_note, not for normal voice/doc/audio.
+            await self.maybe_send_timer_media_candidate_immediately(cached, msg)
+
+            # Optional experimental mode: forward every incoming media. Default OFF.
             if os.getenv("INSTANT_MEDIA_BACKUP_ALL", "false").lower() in {"1", "true", "yes", "on"}:
                 await self.maybe_send_instant_media_backup(cached, msg)
             else:
-                # This sends only when raw Telegram update has an explicit timer hint.
-                # If Telegram hides the timer flag, we still catch it on delete event
-                # using the recent-media fallback.
                 await self.maybe_send_disappearing_media_immediately(cached, msg)
         if not cached or not cached.get("owner_tg_id"):
             return
         owner_id = int(cached["owner_tg_id"])
         body = cached.get("text") or cached.get("caption") or ""
         if not body:
-            return
-        if not await self.db.active_subscription(owner_id):
             return
         lang = await self.user_lang(owner_id)
         matches = await self.db.match_keywords(owner_id, body)
@@ -2748,11 +2890,11 @@ class BotHandlers:
                             await self.db.mark_deleted_event(bc_id, owner_id, chat_id, int(message_id), None, data, False)
                             if await self.db.can_use_free_deleted(owner_id):
                                 msg = (
-                                    "⚠️ Таймерове/видалене медіа не вдалося показати: Telegram не дав мені свіжий файл для цього видалення. Я не буду підставляти старі фото з чату."
+                                    "⚠️ Таймерове/видалене медіа не вдалося показати: Telegram не передав свіжий файл. Старі фото/відео я не підставляю."
                                     if lang == "uk"
-                                    else "⚠️ Таймерное/удалённое медиа не удалось показать: Telegram не дал мне свежий файл для этого удаления. Я не буду подставлять старые фото из чата."
+                                    else "⚠️ Таймерное/удалённое медиа не удалось показать: Telegram не передал свежий файл. Старые фото/видео я не подставляю."
                                     if lang == "ru"
-                                    else "⚠️ Could not show timer/deleted media: Telegram did not provide a fresh file for this deletion. I will not substitute older media from the chat."
+                                    else "⚠️ Could not show timer/deleted media: Telegram did not pass a fresh file. I will not substitute older media."
                                 )
                                 await self.safe_send(owner_id, msg)
                                 await self.db.consume_free_deleted(owner_id)

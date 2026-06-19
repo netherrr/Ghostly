@@ -259,3 +259,18 @@ Important notes:
 
 ### Timezone
 Set `APP_TIMEZONE=Europe/Kyiv` in Railway Variables to display deleted-message times in Kyiv/local project time instead of UTC.
+
+
+## Ghostly no-Premium Chat Automation rebuild
+
+This build is rebuilt for the newer Telegram Chat Automation / Chatbots flow:
+
+- UI no longer says Telegram Premium is required.
+- Core protection is open by default: `FREE_FULL_ACCESS=true`.
+- Start/status/connect texts use "Chat Automation / Автоматизація чатів" instead of mandatory "Telegram Business Premium".
+- Normal voice/photo/video messages are cached silently and are not spammed immediately.
+- Likely timer media is sent immediately only for captionless `photo`, `video`, and `video_note`; voice/audio/documents are excluded to avoid spam.
+- If Telegram exposes explicit `ttl/self_destruct/expire` metadata, the bot treats it as timer media.
+- Deleted media fallback uses strict short windows to avoid sending older wrong files.
+- Raw update logs are off by default. Enable with `GHOSTLY_DEBUG_UPDATES=true`.
+- Broad "send every media instantly" remains off unless `INSTANT_MEDIA_BACKUP_ALL=true`.

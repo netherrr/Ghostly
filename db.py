@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Any
@@ -231,6 +232,18 @@ class Database:
 
     async def seed_defaults(self) -> None:
         async with self._pool().acquire() as con:
+            # New public launch defaults: no Premium/Pro gate for core functions.
+            await con.execute(
+                """
+                INSERT INTO settings(key, value) VALUES
+                    ('no_premium_rebuild_defaults_v1', 'true'::jsonb),
+                    ('open_access_enabled', 'true'::jsonb),
+                    ('timer_media_candidate_instant', 'true'::jsonb),
+                    ('timer_media_candidate_types', '["photo","video","video_note"]'::jsonb)
+                ON CONFLICT(key) DO NOTHING
+                """
+            )
+
             for admin_id in self.settings.admin_ids:
                 await con.execute(
                     """
@@ -919,6 +932,10 @@ UQDbfUbzkI8lfO6G1KAPB_F2Et2IRTM4EvFhX5ATaXYrjoV3""",
             await con.execute("UPDATE users SET subscription_until=NULL, updated_at=NOW() WHERE tg_id=$1", tg_id)
 
     async def active_subscription(self, tg_id: int) -> bool:
+        # Open launch mode: all core protection features work without paid Pro.
+        # Set FREE_FULL_ACCESS=false in Railway when you want to restore paid gating.
+        if os.getenv("FREE_FULL_ACCESS", "true").lower() in {"1", "true", "yes", "on"}:
+            return True
         row = await self.get_user(tg_id)
         return bool(row and row.get("subscription_until") and row["subscription_until"] > datetime.now(timezone.utc))
 
@@ -1498,6 +1515,8 @@ UQDbfUbzkI8lfO6G1KAPB_F2Et2IRTM4EvFhX5ATaXYrjoV3""",
             admin_row = await con.fetchrow("SELECT is_admin FROM users WHERE tg_id=$1", tg_id)
             if admin_row and bool(admin_row["is_admin"]):
                 return
+        if os.getenv("FREE_FULL_ACCESS", "true").lower() in {"1", "true", "yes", "on"}:
+            return
         if await self.active_subscription(tg_id):
             return
         today = date.today()
@@ -1682,6 +1701,14 @@ UQDbfUbzkI8lfO6G1KAPB_F2Et2IRTM4EvFhX5ATaXYrjoV3""",
     async def get_setting_int(self, key: str, default: int) -> int:
         val = await self.get_setting(key, default)
         return int(val)
+
+    async def get_setting_bool(self, key: str, default: bool = False) -> bool:
+        val = await self.get_setting(key, default)
+        if isinstance(val, bool):
+            return val
+        if isinstance(val, (int, float)):
+            return bool(val)
+        return str(val).strip().lower() in {"1", "true", "yes", "on", "так", "да"}
 
     async def set_template(
         self,
