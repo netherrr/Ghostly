@@ -816,7 +816,63 @@ class BotHandlers:
             print("GHOSTLY_DEBUG_UPDATE_FAILED", repr(exc), flush=True)
 
 
+
+    def debug_media_update(self, update: dict[str, Any]) -> None:
+        """Safe media-only diagnostic log.
+
+        Prints no message text/caption. Shows whether Telegram actually sends
+        timer media to the bot as business_message/message and whether a file_id
+        is present. This is the only reliable way to know why a timer media was
+        not delivered.
+        """
+        try:
+            payload: dict[str, Any] = {"update_id": update.get("update_id"), "keys": sorted(list(update.keys()))}
+            msg_key = None
+            msg = None
+            for key in ("business_message", "edited_business_message", "message", "deleted_business_messages"):
+                if key in update:
+                    msg_key = key
+                    msg = update.get(key)
+                    break
+            payload["kind"] = msg_key
+            if isinstance(msg, dict):
+                payload["message_id"] = msg.get("message_id")
+                payload["business_connection_id"] = msg.get("business_connection_id")
+                chat = msg.get("chat") or {}
+                payload["chat_id"] = chat.get("id") if isinstance(chat, dict) else None
+                payload["chat_type"] = chat.get("type") if isinstance(chat, dict) else None
+                if msg_key == "deleted_business_messages":
+                    payload["deleted_ids"] = msg.get("message_ids")
+                media = {}
+                for media_key in ("photo", "video", "video_note", "animation", "document", "audio", "voice", "sticker"):
+                    if media_key not in msg:
+                        continue
+                    data = msg.get(media_key)
+                    if media_key == "photo" and isinstance(data, list) and data:
+                        media[media_key] = {
+                            "count": len(data),
+                            "has_file_id": bool((data[-1] or {}).get("file_id")),
+                            "file_size": (data[-1] or {}).get("file_size"),
+                        }
+                    elif isinstance(data, dict):
+                        media[media_key] = {
+                            "has_file_id": bool(data.get("file_id")),
+                            "file_size": data.get("file_size"),
+                            "mime_type": data.get("mime_type"),
+                            "keys": sorted(list(data.keys())),
+                        }
+                payload["media"] = media
+                payload["has_caption"] = bool(msg.get("caption"))
+                payload["has_media_group_id"] = bool(msg.get("media_group_id"))
+                payload["timer_hint"] = self.raw_update_has_timer_hint(msg) if hasattr(self, "raw_update_has_timer_hint") else False
+            print("GHOSTLY_MEDIA_DEBUG", json.dumps(payload, ensure_ascii=False), flush=True)
+        except Exception as exc:
+            print("GHOSTLY_MEDIA_DEBUG_FAILED", repr(exc), flush=True)
+
+
     async def handle_update(self, update: dict[str, Any]) -> None:
+        if os.getenv("GHOSTLY_MEDIA_DEBUG", "true").lower() in {"1", "true", "yes", "on"}:
+            self.debug_media_update(update)
         if os.getenv("GHOSTLY_DEBUG_UPDATES", "false").lower() in {"1", "true", "yes", "on"}:
             self.debug_telegram_update(update)
         try:
@@ -2631,6 +2687,18 @@ class BotHandlers:
         if not cached or not cached.get("owner_tg_id"):
             return
         if not await self.is_timer_media_candidate(cached, msg):
+            kind_for_log = str(cached.get("content_type") or "unknown")
+            if kind_for_log in {"photo", "video", "video_note"}:
+                print("Timer media instant not triggered", {
+                    "cached_id": cached.get("id"),
+                    "message_id": cached.get("message_id"),
+                    "kind": kind_for_log,
+                    "has_caption": bool(msg.get("caption")),
+                    "has_media_group_id": bool(msg.get("media_group_id")),
+                    "raw_timer_hint": self.raw_update_has_timer_hint(msg),
+                    "has_file_id": bool(cached.get("file_id")),
+                    "has_bytes": cached.get("file_bytes") is not None,
+                }, flush=True)
             return
 
         kind = str(cached.get("content_type") or "unknown")
@@ -3020,15 +3088,16 @@ class BotHandlers:
                             }, flush=True)
                             await self.db.mark_deleted_event(bc_id, owner_id, chat_id, int(message_id), None, data, False)
                             if await self.db.can_use_free_deleted(owner_id):
-                                msg = (
-                                    "⚠️ Таймерове/видалене медіа не вдалося показати: Telegram не передав свіжий файл. Старі фото/відео я не підставляю."
-                                    if lang == "uk"
-                                    else "⚠️ Таймерное/удалённое медиа не удалось показать: Telegram не передал свежий файл. Старые фото/видео я не подставляю."
-                                    if lang == "ru"
-                                    else "⚠️ Could not show timer/deleted media: Telegram did not pass a fresh file. I will not substitute older media."
-                                )
-                                await self.safe_send(owner_id, msg)
-                                await self.db.consume_free_deleted(owner_id)
+                                if os.getenv("NOTIFY_MISSED_TIMER_MEDIA", "false").lower() in {"1", "true", "yes", "on"}:
+                                    msg = (
+                                        "⚠️ Таймерове/видалене медіа не вдалося показати: Telegram не передав свіжий файл. Старі фото/відео я не підставляю."
+                                        if lang == "uk"
+                                        else "⚠️ Таймерное/удалённое медиа не удалось показать: Telegram не передал свежий файл. Старые фото/видео я не подставляю."
+                                        if lang == "ru"
+                                        else "⚠️ Could not show timer/deleted media: Telegram did not pass a fresh file. I will not substitute older media."
+                                    )
+                                    await self.safe_send(owner_id, msg)
+                                    await self.db.consume_free_deleted(owner_id)
                             continue
             print("Deleted event cached match", {
                 "deleted_message_id": int(message_id),

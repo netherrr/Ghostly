@@ -295,3 +295,13 @@ Useful env toggles:
 - `TIMER_MEDIA_CAPTIONLESS_INSTANT=false` disables the fallback and uses only explicit timer hints.
 - `DIRECT_TIMER_MEDIA_ENABLED=false` disables direct-message timer handling.
 - `GHOSTLY_DEBUG_UPDATES=true` enables raw update diagnostics.
+
+
+## Timer truth debug + no false warnings
+
+This build keeps timer-only behavior but adds safe media-only logs by default:
+
+- `GHOSTLY_MEDIA_DEBUG=true` logs whether Telegram sent `business_message`/`message` media and `file_id`.
+- It does not log message text/captions.
+- `NOTIFY_MISSED_TIMER_MEDIA=false` by default, so users do not see annoying failure warnings when Telegram sends only a deletion event without a file.
+- If a timer photo/video is not delivered, check Railway for `GHOSTLY_MEDIA_DEBUG`, `Media cached bytes`, `Timer media instant not triggered`, and `Timer media instant delivery result`.
