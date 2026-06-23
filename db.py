@@ -1218,6 +1218,14 @@ UQDbfUbzkI8lfO6G1KAPB_F2Et2IRTM4EvFhX5ATaXYrjoV3""",
         sender = msg.get("from") or msg.get("sender_chat") or {}
         content_type, text, caption, file_id = extract_message_content(msg)
         file_name, file_size, mime_type, is_disappearing = extract_file_metadata(msg)
+        # Heuristic: captionless single photo/video/video_note in a business chat is
+        # almost always a disappearing media. Mark it so fallback queries can filter
+        # correctly without returning normal media with captions.
+        if (not is_disappearing
+                and content_type in ("photo", "video", "video_note")
+                and not caption
+                and not msg.get("media_group_id")):
+            is_disappearing = True
         sender_name = display_name(sender)
         chat_title = display_name(chat)
         async with self._pool().acquire() as con:
@@ -1406,6 +1414,7 @@ UQDbfUbzkI8lfO6G1KAPB_F2Et2IRTM4EvFhX5ATaXYrjoV3""",
                    AND owner_tg_id=$2
                    AND chat_id=$3
                    AND deleted_at IS NULL
+                   AND is_disappearing=TRUE
                    AND content_type IN ('photo','video','animation','document','audio','voice','video_note','sticker')
                    AND (file_bytes IS NOT NULL OR file_id IS NOT NULL)
                    AND created_at >= NOW() - make_interval(mins => $4::int)
@@ -1453,6 +1462,7 @@ UQDbfUbzkI8lfO6G1KAPB_F2Et2IRTM4EvFhX5ATaXYrjoV3""",
                   FROM cached_messages
                  WHERE owner_tg_id=$1
                    AND deleted_at IS NULL
+                   AND is_disappearing=TRUE
                    AND content_type IN ('photo','video','animation','document','audio','voice','video_note','sticker')
                    AND (file_bytes IS NOT NULL OR file_id IS NOT NULL)
                    AND created_at >= NOW() - make_interval(mins => $2::int)
@@ -1485,6 +1495,7 @@ UQDbfUbzkI8lfO6G1KAPB_F2Et2IRTM4EvFhX5ATaXYrjoV3""",
                 SELECT *
                   FROM cached_messages
                  WHERE owner_tg_id=$1
+                   AND is_disappearing=TRUE
                    AND content_type IN ('photo','video','animation','document','audio','voice','video_note','sticker')
                    AND (file_bytes IS NOT NULL OR file_id IS NOT NULL)
                    AND created_at >= NOW() - make_interval(secs => $2::int)
@@ -1810,6 +1821,10 @@ UQDbfUbzkI8lfO6G1KAPB_F2Et2IRTM4EvFhX5ATaXYrjoV3""",
                 media = None
             return {"text": value.get("text") or "", "entities": entities, "media": media}
         return None
+
+    async def delete_template(self, key: str) -> None:
+        async with self._pool().acquire() as con:
+            await con.execute("DELETE FROM bot_settings WHERE key=$1", f"template_{key}")
 
     async def set_state(self, user_id: int, state: str, payload: dict[str, Any] | None = None) -> None:
         async with self._pool().acquire() as con:

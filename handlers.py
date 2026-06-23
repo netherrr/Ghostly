@@ -1631,29 +1631,42 @@ class BotHandlers:
         await self._send_or_edit(tg_id, text, back_menu(lang), edit)
 
     async def show_plans(self, tg_id: int, lang: str, edit: tuple[int, int] | None = None) -> None:
-        plans = await self.db.plans(active_only=True)
-        plan_lines = []
-        for p in plans:
-            # Plain plan blocks are safe inside editable templates with Premium emoji.
-            plan_lines.append(f"💎 {plan_name(p, lang)} — ${p['price_usd']} / {plan_duration_label(p.get('duration_days'), lang)}\n{plan_features(p, lang)}")
-        tpl = await self.db.get_template(f"plans_{lang}")
-        if tpl:
-            values = {"plans_list": "\n\n".join(plan_lines)}
-            rendered, ents = render_dynamic_template(str(tpl.get("text") or ""), tpl.get("entities") or [], values)
-            media = tpl.get("media")
-            if media:
-                if edit:
-                    chat_id, message_id = edit
-                    try:
-                        await self.bot.delete_message(chat_id, message_id)
-                    except Exception:
-                        pass
-                await self.send_template_content(tg_id, rendered, ents, media, plans_keyboard(lang, plans))
-            else:
-                await self._send_or_edit(tg_id, rendered, plans_keyboard(lang, plans), edit, entities=ents)
-            return
-        lines = [tr(lang, "plans_title", app=e(self.settings.app_name), bot_username=e(self._bot_username())), *plan_lines]
-        await self._send_or_edit(tg_id, "\n\n".join(lines), plans_keyboard(lang, plans), edit)
+        try:
+            plans = await self.db.plans(active_only=True)
+            plan_lines = []
+            for p in plans:
+                plan_lines.append(f"💎 {plan_name(p, lang)} — ${p['price_usd']} / {plan_duration_label(p.get('duration_days'), lang)}\n{plan_features(p, lang)}")
+            if not plans:
+                no_plans = (
+                    "🔒 Активних тарифів поки немає. Поверніться пізніше."
+                    if lang == "uk" else
+                    "🔒 Активных тарифов пока нет. Вернитесь позже."
+                    if lang == "ru" else
+                    "🔒 No active plans yet. Check back later."
+                )
+                await self._send_or_edit(tg_id, no_plans, back_menu(lang), edit)
+                return
+            tpl = await self.db.get_template(f"plans_{lang}")
+            if tpl:
+                values = {"plans_list": "\n\n".join(plan_lines)}
+                rendered, ents = render_dynamic_template(str(tpl.get("text") or ""), tpl.get("entities") or [], values)
+                media = tpl.get("media")
+                if media:
+                    if edit:
+                        chat_id, message_id = edit
+                        try:
+                            await self.bot.delete_message(chat_id, message_id)
+                        except Exception:
+                            pass
+                    await self.send_template_content(tg_id, rendered, ents, media, plans_keyboard(lang, plans))
+                else:
+                    await self._send_or_edit(tg_id, rendered, plans_keyboard(lang, plans), edit, entities=ents)
+                return
+            lines = [tr(lang, "plans_title", app=e(self.settings.app_name), bot_username=e(self._bot_username())), *plan_lines]
+            await self._send_or_edit(tg_id, "\n\n".join(lines), plans_keyboard(lang, plans), edit)
+        except Exception as exc:
+            print("show_plans error:", repr(exc), flush=True)
+            await self.safe_send(tg_id, "❌ Не вдалося завантажити тарифи. Спробуй /plans ще раз або напиши підтримці.")
 
     async def show_admin(self, tg_id: int, lang: str, edit: tuple[int, int] | None = None) -> None:
         if not await self.db.is_admin(tg_id):
@@ -3561,6 +3574,14 @@ class BotHandlers:
             elif cmd == "/cleanup":
                 deleted = await self.db.cleanup_old_messages()
                 await self.bot.send_message(admin_id, f"🧹 Cleanup done. Deleted rows: {deleted}")
+            elif cmd == "/reset_connect":
+                for lang_code in ("uk", "ru", "en"):
+                    await self.db.delete_template(f"connect_{lang_code}")
+                await self.bot.send_message(admin_id, "✅ Connect templates cleared. The 'How to connect' button now shows text-only instructions with the current bot username.")
+            elif cmd == "/reset_plans":
+                for lang_code in ("uk", "ru", "en"):
+                    await self.db.delete_template(f"plans_{lang_code}")
+                await self.bot.send_message(admin_id, "✅ Plans templates cleared. The subscription screen now shows the default layout.")
             else:
                 await self.show_admin(admin_id, lang)
         except Exception as exc:
