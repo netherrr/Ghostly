@@ -88,14 +88,14 @@ async def index() -> str:
 <body>
   <main class="wrap">
     <div class="card">
-      <div class="badge">Telegram Business Chat Guard</div>
+      <div class="badge">🕵️ Telegram Business Spy Bot</div>
       <h1>{settings.app_name}</h1>
-      <p>Бот працює через офіційне Telegram Business-підключення: не просить коди входу, паролі або session string. Він зберігає тільки нові повідомлення після підключення й показує видалені/відредаговані повідомлення власнику акаунта.</p>
+      <p>Бот працює через офіційне Telegram Business-підключення: не просить коди входу, паролі або session string. Зберігає видалені/відредаговані повідомлення та зникаючі медіа (кружки, голосові, фото, відео).</p>
       <div class="grid">
-        <div class="item"><b>👻 Deleted messages</b><br/>Показ видалених повідомлень, якщо бот встиг їх зберегти.</div>
-        <div class="item"><b>✏️ Edit history</b><br/>Історія змін повідомлень для Pro-користувачів.</div>
-        <div class="item"><b>💳 Payments</b><br/>CryptoBot автоматично + ручна картка/USDT.</div>
-        <div class="item"><b>👑 Button admin panel</b><br/>Тарифи, ціни, заявки й методи оплати керуються кнопками без коду.</div>
+        <div class="item"><b>👁 Deleted messages</b><br/>Зберігає та показує видалені повідомлення в особистих та групових чатах.</div>
+        <div class="item"><b>🔥 Disappearing media</b><br/>Зберігає зникаючі кружки, голосові, фото та відео одразу при отриманні.</div>
+        <div class="item"><b>🔎 Keyword monitoring</b><br/>Моніторинг чатів за вибраними словами та фразами.</div>
+        <div class="item"><b>👑 Admin panel</b><br/>Тарифи, ціни, заявки й методи оплати керуються кнопками без коду.</div>
       </div>
       <p>Health endpoint: <code>/health</code></p>
     </div>

@@ -342,9 +342,9 @@ DYNAMIC_TEMPLATE_SPECS = {
     "plans": {
         "vars": ["plans_list"],
         "default": {
-            "uk": "💎 Тарифи Ghostly Guard\n\n{plans_list}",
-            "ru": "💎 Тарифы Ghostly Guard\n\n{plans_list}",
-            "en": "💎 Ghostly Guard plans\n\n{plans_list}",
+            "uk": "💎 Тарифи VERTUU SPY BOT\n\n{plans_list}",
+            "ru": "💎 Тарифы VERTUU SPY BOT\n\n{plans_list}",
+            "en": "💎 VERTUU SPY BOT plans\n\n{plans_list}",
         },
     },
     "keywords": {
@@ -358,17 +358,17 @@ DYNAMIC_TEMPLATE_SPECS = {
     "deleted": {
         "vars": ["deleted_messages_list", "deleted_count"],
         "default": {
-            "uk": "👻 Останні видалені\n\nЗнайдено: {deleted_count}\n\n{deleted_messages_list}",
-            "ru": "👻 Последние удалённые\n\nНайдено: {deleted_count}\n\n{deleted_messages_list}",
-            "en": "👻 Last deleted\n\nFound: {deleted_count}\n\n{deleted_messages_list}",
+            "uk": "👁 Останні видалені\n\nЗнайдено: {deleted_count}\n\n{deleted_messages_list}",
+            "ru": "👁 Последние удалённые\n\nНайдено: {deleted_count}\n\n{deleted_messages_list}",
+            "en": "👁 Last deleted\n\nFound: {deleted_count}\n\n{deleted_messages_list}",
         },
     },
     "referrals": {
         "vars": ["referral_link", "referral_percent", "invited_count", "purchases_count", "earned_total", "available_total", "paid_total"],
         "default": {
-            "uk": "🤝 Реферальна система\n\nЗапрошуй друзів у Ghostly Guard і отримуй {referral_percent}% з кожної їхньої покупки.\n\n🔗 Твоє посилання:\n{referral_link}\n\n👥 Запрошено: {invited_count}\n🛒 Покупок: {purchases_count}\n💰 Зароблено: ${earned_total}\n💵 Доступно: ${available_total}\n✅ Виплачено: ${paid_total}",
-            "ru": "🤝 Реферальная система\n\nПриглашай друзей в Ghostly Guard и получай {referral_percent}% с каждой их покупки.\n\n🔗 Твоя ссылка:\n{referral_link}\n\n👥 Приглашено: {invited_count}\n🛒 Покупок: {purchases_count}\n💰 Заработано: ${earned_total}\n💵 Доступно: ${available_total}\n✅ Выплачено: ${paid_total}",
-            "en": "🤝 Referral system\n\nInvite friends to Ghostly Guard and earn {referral_percent}% from every purchase they make.\n\n🔗 Your link:\n{referral_link}\n\n👥 Invited: {invited_count}\n🛒 Purchases: {purchases_count}\n💰 Earned: ${earned_total}\n💵 Available: ${available_total}\n✅ Paid: ${paid_total}",
+            "uk": "🤝 Реферальна система\n\nЗапрошуй друзів у VERTUU SPY BOT і отримуй {referral_percent}% з кожної їхньої покупки.\n\n🔗 Твоє посилання:\n{referral_link}\n\n👥 Запрошено: {invited_count}\n🛒 Покупок: {purchases_count}\n💰 Зароблено: ${earned_total}\n💵 Доступно: ${available_total}\n✅ Виплачено: ${paid_total}",
+            "ru": "🤝 Реферальная система\n\nПриглашай друзей в VERTUU SPY BOT и получай {referral_percent}% с каждой их покупки.\n\n🔗 Твоя ссылка:\n{referral_link}\n\n👥 Приглашено: {invited_count}\n🛒 Покупок: {purchases_count}\n💰 Заработано: ${earned_total}\n💵 Доступно: ${available_total}\n✅ Выплачено: ${paid_total}",
+            "en": "🤝 Referral system\n\nInvite friends to VERTUU SPY BOT and earn {referral_percent}% from every purchase they make.\n\n🔗 Your link:\n{referral_link}\n\n👥 Invited: {invited_count}\n🛒 Purchases: {purchases_count}\n💰 Earned: ${earned_total}\n💵 Available: ${available_total}\n✅ Paid: ${paid_total}",
         },
     },
     "choose_payment": {
@@ -645,7 +645,7 @@ def detect_template_from_target(target: dict[str, Any] | None, lang: str) -> str
         return f"payment_manual_{lang}"
     if any(x in low for x in ["оплата тарифу", "оплата тарифа", "plan payment", "обери спосіб оплати", "выбери способ оплаты", "choose payment method"]):
         return f"choose_payment_{lang}"
-    if any(x in low for x in ["тарифи ghostly", "тарифы ghostly", "ghostly guard plans", "обери тариф", "выбери тариф", "choose a plan", "choose plan", "free-режим", "free режим"]):
+    if any(x in low for x in ["тарифи vertuu", "тарифы vertuu", "vertuu spy bot plans", "обери тариф", "выбери тариф", "choose a plan", "choose plan", "free-режим", "free режим"]):
         return f"plans_{lang}"
     if any(x in low for x in ["ключовими словами", "ключевым словам", "keyword alerts", "keywords:", "слів:", "слов:"]):
         return f"keywords_{lang}"
@@ -657,7 +657,7 @@ def detect_template_from_target(target: dict[str, Any] | None, lang: str) -> str
         return f"prompt_keyword_add_{lang}"
     if any(x in low for x in ["надішли квитанцію", "отправь квитанцию", "send a receipt", "скрін/квитанцію", "receipt/screenshot"]):
         return f"prompt_manual_payment_proof_{lang}"
-    if any(x in low for x in ["ghostly", "що я вмію", "что я умею", "what i can", "особистий захист", "личный защит", "telegram-чат"]):
+    if any(x in low for x in ["vertuu", "шпигун", "шпион", "spy bot", "що я вмію", "что я умею", "what i can", "особистий захист", "личный защит", "telegram-чат"]):
         return f"start_{lang}"
     return None
 
@@ -914,11 +914,11 @@ class BotHandlers:
         if not is_admin and not await self.db.active_subscription(tg_id):
             await self.safe_send(
                 tg_id,
-                "🔒 <b>Медіа-бекап доступний у Pro.</b>\n\nПідключи Pro або Telegram Business, щоб Ghostly зберігав медіа автоматично."
+                "🔒 <b>Медіа-бекап доступний у Pro.</b>\n\nПідключи Pro або Telegram Business, щоб VERTUU SPY BOT зберігав медіа автоматично."
                 if lang == "uk"
-                else "🔒 <b>Медиа-бэкап доступен в Pro.</b>\n\nПодключи Pro или Telegram Business, чтобы Ghostly сохранял медиа автоматически."
+                else "🔒 <b>Медиа-бэкап доступен в Pro.</b>\n\nПодключи Pro или Telegram Business, чтобы VERTUU SPY BOT сохранял медиа автоматически."
                 if lang == "ru"
-                else "🔒 <b>Media backup is available in Pro.</b>\n\nEnable Pro or Telegram Business so Ghostly can save media automatically.",
+                else "🔒 <b>Media backup is available in Pro.</b>\n\nEnable Pro or Telegram Business so VERTUU SPY BOT can save media automatically.",
                 plans_keyboard(lang, await self.db.plans(True)),
             )
             return True
@@ -961,7 +961,7 @@ class BotHandlers:
                 "content_type": kind,
                 "file_id": file_id,
                 "file_bytes": content,
-                "file_name": file_name or f"ghostly_direct_{kind}.bin",
+                "file_name": file_name or f"vertuu_direct_{kind}.bin",
                 "file_size": len(content),
                 "mime_type": mime_type,
                 "caption": caption,
@@ -1055,7 +1055,7 @@ class BotHandlers:
             content = await self.bot.download_file(file_path, max_bytes=self.media_cache_max_bytes())
             fake_cached.update({
                 "file_bytes": content,
-                "file_name": file_name or f"ghostly_timer_{kind}.bin",
+                "file_name": file_name or f"vertuu_timer_{kind}.bin",
                 "file_size": len(content),
                 "mime_type": mime_type,
             })
@@ -1524,7 +1524,7 @@ class BotHandlers:
         if tpl:
             await self.send_template_screen(tg_id, tpl, main_menu(lang, is_admin), edit)
             return
-        await self._send_or_edit(tg_id, tr(lang, "menu"), main_menu(lang, is_admin), edit)
+        await self._send_or_edit(tg_id, tr(lang, "menu", app=e(self.settings.app_name)), main_menu(lang, is_admin), edit)
 
     async def show_language_screen(self, tg_id: int, lang: str, edit: tuple[int, int] | None = None) -> None:
         tpl = await self.db.get_template(f"choose_lang_{lang}")
@@ -1547,7 +1547,7 @@ class BotHandlers:
                     await self.bot.delete_message(chat_id, message_id)
                 except Exception:
                     pass
-            caption = tr(lang, "connect", app=e(self.settings.app_name))
+            caption = tr(lang, "connect", app=e(self.settings.app_name), bot_username=e(self._bot_username()))
             await self.bot.send_media_bytes(
                 tg_id,
                 "photo",
@@ -1579,7 +1579,7 @@ class BotHandlers:
         else:
             if await self.send_connect_card(tg_id, lang, edit):
                 return
-            text = tr(lang, "connect", app=e(self.settings.app_name))
+            text = tr(lang, "connect", app=e(self.settings.app_name), bot_username=e(self._bot_username()))
             entities = None
             if video_url:
                 label = "🎬 Video guide" if lang == "en" else "🎬 Видео-инструкция" if lang == "ru" else "🎬 Відео-інструкція"
@@ -1652,7 +1652,7 @@ class BotHandlers:
             else:
                 await self._send_or_edit(tg_id, rendered, plans_keyboard(lang, plans), edit, entities=ents)
             return
-        lines = [tr(lang, "plans_title"), *plan_lines]
+        lines = [tr(lang, "plans_title", app=e(self.settings.app_name), bot_username=e(self._bot_username())), *plan_lines]
         await self._send_or_edit(tg_id, "\n\n".join(lines), plans_keyboard(lang, plans), edit)
 
     async def show_admin(self, tg_id: int, lang: str, edit: tuple[int, int] | None = None) -> None:
@@ -1742,7 +1742,7 @@ class BotHandlers:
 
 
     def bot_username(self) -> str:
-        return str(getattr(self.settings, "bot_username", None) or "GhostlyGuardBot").lstrip("@")
+        return str(getattr(self.settings, "bot_username", None) or "VertuuSpyBot").lstrip("@")
 
     def referral_link(self, tg_id: int) -> str:
         return f"https://t.me/{self.bot_username()}?start=ref_{int(tg_id)}"
@@ -1779,7 +1779,7 @@ class BotHandlers:
         if lang == "en":
             text = (
                 f"🤝 <b>Referral system</b>\n\n"
-                f"Invite friends to Ghostly Guard and earn <b>{e(percent)}%</b> from every purchase they make.\n\n"
+                f"Invite friends to VERTUU SPY BOT and earn <b>{e(percent)}%</b> from every purchase they make.\n\n"
                 f"🔗 <b>Your link:</b>\n<code>{e(values['referral_link'])}</code>\n\n"
                 f"👥 Invited: <b>{e(values['invited_count'])}</b>\n"
                 f"🛒 Purchases: <b>{e(values['purchases_count'])}</b>\n"
@@ -1790,7 +1790,7 @@ class BotHandlers:
         elif lang == "ru":
             text = (
                 f"🤝 <b>Реферальная система</b>\n\n"
-                f"Приглашай друзей в Ghostly Guard и получай <b>{e(percent)}%</b> с каждой их покупки.\n\n"
+                f"Приглашай друзей в VERTUU SPY BOT и получай <b>{e(percent)}%</b> с каждой их покупки.\n\n"
                 f"🔗 <b>Твоя ссылка:</b>\n<code>{e(values['referral_link'])}</code>\n\n"
                 f"👥 Приглашено: <b>{e(values['invited_count'])}</b>\n"
                 f"🛒 Покупок: <b>{e(values['purchases_count'])}</b>\n"
@@ -1801,7 +1801,7 @@ class BotHandlers:
         else:
             text = (
                 f"🤝 <b>Реферальна система</b>\n\n"
-                f"Запрошуй друзів у Ghostly Guard і отримуй <b>{e(percent)}%</b> з кожної їхньої покупки.\n\n"
+                f"Запрошуй друзів у VERTUU SPY BOT і отримуй <b>{e(percent)}%</b> з кожної їхньої покупки.\n\n"
                 f"🔗 <b>Твоє посилання:</b>\n<code>{e(values['referral_link'])}</code>\n\n"
                 f"👥 Запрошено: <b>{e(values['invited_count'])}</b>\n"
                 f"🛒 Покупок: <b>{e(values['purchases_count'])}</b>\n"
@@ -2377,8 +2377,85 @@ class BotHandlers:
                 await self.bot.send_message(admin_id, f"Не вийшло скопіювати доказ: <code>{e(repr(exc))}</code>")
 
     async def show_admin_stats(self, tg_id: int, lang: str, edit: tuple[int, int] | None = None) -> None:
-        s = await self.db.stats()
-        await self._send_or_edit(tg_id, tr(lang, "stats", **{k: e(v) for k, v in s.items()}), back_menu(lang, "admin"), edit)
+        from datetime import datetime, timezone
+        s = await self.db.extended_stats()
+        now = datetime.now(timezone.utc).strftime("%d.%m %H:%M")
+        ref = s.get("referrals") or {}
+        plans = s.get("plans_breakdown") or []
+
+        def fmt_usd(val: object) -> str:
+            try:
+                return f"{float(val):.2f}"
+            except Exception:
+                return "0.00"
+
+        lines = [
+            f"📊 <b>СТАТИСТИКА VERTUU SPY BOT</b> | {now}",
+            "〰️〰️〰️〰️〰️〰️〰️〰️〰️",
+            "",
+            "👥 <b>КОРИСТУВАЧІ:</b>",
+            f"🚀 Всього: <b>{e(s.get('users_total', 0))}</b>",
+            f"🆕 Нових сьогодні: <b>+{e(s.get('users_today', 0))}</b>",
+            f"🌗 За 7 днів: <b>+{e(s.get('users_7d', 0))}</b>",
+            f"☀️ За 30 днів: <b>+{e(s.get('users_30d', 0))}</b>",
+            f"🔌 Активних підключень: <b>{e(s.get('connections_active', 0))}</b>",
+            "",
+            "〰️〰️〰️〰️〰️〰️〰️〰️〰️",
+            "",
+            "💎 <b>ПІДПИСКИ:</b>",
+            f"✅ Активних Pro: <b>{e(s.get('subs_active', 0))}</b>",
+            f"⌛ Закінчились: <b>{e(s.get('subs_expired', 0))}</b>",
+            f"📊 Всього куплено: <b>{e(s.get('payments_paid_count', 0))}</b>",
+            "",
+            "〰️〰️〰️〰️〰️〰️〰️〰️〰️",
+            "",
+            "💰 <b>ФІНАНСИ:</b>",
+            f"💵 Всього отримано: <b>${fmt_usd(s.get('revenue_total', 0))}</b>",
+            f"📅 Сьогодні: <b>+${fmt_usd(s.get('revenue_today', 0))}</b>",
+            f"📆 За 7 днів: <b>+${fmt_usd(s.get('revenue_7d', 0))}</b>",
+            f"🗓 За 30 днів: <b>+${fmt_usd(s.get('revenue_30d', 0))}</b>",
+            "",
+            "💳 <b>ПО МЕТОДАХ:</b>",
+            f"💳 Картка: <b>${fmt_usd(s.get('revenue_card', 0))}</b>",
+            f"💎 USDT: <b>${fmt_usd(s.get('revenue_usdt', 0))}</b>",
+            f"🤖 CryptoBot: <b>${fmt_usd(s.get('revenue_crypto', 0))}</b>",
+            f"⭐ Stars: <b>${fmt_usd(s.get('revenue_stars', 0))}</b>",
+            f"⏳ Очікують перевірки: <b>{e(s.get('payments_pending', 0))}</b>",
+            f"❌ Відхилено: <b>{e(s.get('payments_rejected', 0))}</b>",
+            "",
+            "〰️〰️〰️〰️〰️〰️〰️〰️〰️",
+            "",
+            "📬 <b>ПОВІДОМЛЕННЯ:</b>",
+            f"💬 Збережено: <b>{e(s.get('messages_total', 0))}</b>",
+            f"👁 Видалень зафіксовано: <b>{e(s.get('deletions_total', 0))}</b>",
+            f"✅ Доставлено власнику: <b>{e(s.get('deletions_delivered', 0))}</b>",
+            f"🔥 Зникаючих медіа: <b>{e(s.get('messages_disappearing', 0))}</b>",
+            "",
+            "〰️〰️〰️〰️〰️〰️〰️〰️〰️",
+            "",
+            "🔎 <b>КЛЮЧОВІ СЛОВА:</b>",
+            f"📝 Активних фраз: <b>{e(s.get('keywords_active', 0))}</b>",
+            f"👤 Користувачів з моніторингом: <b>{e(s.get('keywords_users', 0))}</b>",
+        ]
+
+        if plans:
+            lines += ["", "〰️〰️〰️〰️〰️〰️〰️〰️〰️", "", "📋 <b>ТАРИФИ (продажі):</b>"]
+            for p in plans:
+                lines.append(f"💎 {e(p.get('name') or '—')}: <b>{e(p.get('cnt', 0))}</b> шт. · <b>${fmt_usd(p.get('total', 0))}</b>")
+
+        if ref:
+            lines += [
+                "",
+                "〰️〰️〰️〰️〰️〰️〰️〰️〰️",
+                "",
+                "🤝 <b>РЕФЕРАЛИ:</b>",
+                f"🛒 Реферальних продажів: <b>{e(ref.get('rewards_count', 0))}</b>",
+                f"💰 Нараховано партнерам: <b>${fmt_usd(ref.get('rewards_total', 0))}</b>",
+                f"💵 Доступно до виплати: <b>${fmt_usd(ref.get('rewards_available', 0))}</b>",
+                f"✅ Виплачено: <b>${fmt_usd(ref.get('rewards_paid', 0))}</b>",
+            ]
+
+        await self._send_or_edit(tg_id, "\n".join(lines), back_menu(lang, "admin"), edit)
 
     async def show_admin_referrals(self, tg_id: int, lang: str, edit: tuple[int, int] | None = None) -> None:
         s = await self.db.admin_referral_stats()
@@ -2653,10 +2730,15 @@ class BotHandlers:
             return True
 
         # Fallback for Telegram versions that hide the timer flag.
-        # Default ON because the product requirement is: timer photo/video must be
-        # sent immediately even before deletion/expiry. Disable if needed with:
-        # TIMER_MEDIA_CAPTIONLESS_INSTANT=false
-        fallback_enabled = os.getenv("TIMER_MEDIA_CAPTIONLESS_INSTANT", "true").lower() in {"1", "true", "yes", "on"}
+        # video_note (circles) are almost always disappearing — treat captionless as hint.
+        # For photo/video, captionless heuristic is OFF by default to avoid false positives
+        # (many normal photos/videos are sent without captions in business chats).
+        # Enable with TIMER_MEDIA_CAPTIONLESS_INSTANT=true to apply to all types.
+        if kind == "video_note":
+            fallback_default = "true"
+        else:
+            fallback_default = "false"
+        fallback_enabled = os.getenv("TIMER_MEDIA_CAPTIONLESS_INSTANT", fallback_default).lower() in {"1", "true", "yes", "on"}
         if not fallback_enabled:
             return False
 
@@ -3249,7 +3331,7 @@ class BotHandlers:
         if kind == "voice":
             mp3_bytes = self.convert_audio_to_mp3(content, ".ogg")
             if mp3_bytes:
-                for send_kind, fname in (("audio", "ghostly_deleted_voice.mp3"), ("document", "ghostly_deleted_voice.mp3")):
+                for send_kind, fname in (("audio", "vertuu_deleted_voice.mp3"), ("document", "vertuu_deleted_voice.mp3")):
                     try:
                         await self.bot.send_media_bytes(owner_id, send_kind, fname, mp3_bytes, "🎙 Видалене голосове / Deleted voice")
                         print("Saved voice delivered", {"mode": send_kind, "bytes": len(mp3_bytes)}, flush=True)
@@ -3260,8 +3342,8 @@ class BotHandlers:
             try:
                 zip_buffer = io.BytesIO()
                 with zipfile.ZipFile(zip_buffer, "w", compression=zipfile.ZIP_DEFLATED) as zf:
-                    zf.writestr(filename if filename.endswith(".ogg") else "ghostly_deleted_voice.ogg", content)
-                await self.bot.send_media_bytes(owner_id, "document", "ghostly_deleted_voice.zip", zip_buffer.getvalue(), "🎙 Голосове збережено в ZIP / Voice saved in ZIP")
+                    zf.writestr(filename if filename.endswith(".ogg") else "vertuu_deleted_voice.ogg", content)
+                await self.bot.send_media_bytes(owner_id, "document", "vertuu_deleted_voice.zip", zip_buffer.getvalue(), "🎙 Голосове збережено в ZIP / Voice saved in ZIP")
                 print("Saved voice delivered", {"mode": "zip", "bytes": len(content)}, flush=True)
                 return True
             except Exception as exc:
@@ -3273,8 +3355,8 @@ class BotHandlers:
         if kind in {"photo", "video", "animation", "audio", "document"}:
             modes.append((kind, filename))
         if kind == "video_note":
-            modes.append(("video", filename if filename.endswith(".mp4") else "ghostly_deleted_video_note.mp4"))
-        modes.append(("document", filename or f"ghostly_deleted_{kind}.bin"))
+            modes.append(("video", filename if filename.endswith(".mp4") else "vertuu_deleted_video_note.mp4"))
+        modes.append(("document", filename or f"vertuu_deleted_{kind}.bin"))
 
         tried = set()
         for send_kind, fname in modes:
@@ -3307,7 +3389,7 @@ class BotHandlers:
                 cached_bytes = raw_bytes  # type: ignore[assignment]
 
         if cached_bytes:
-            filename = str(cached.get("file_name") or f"ghostly_deleted_{kind}.bin")
+            filename = str(cached.get("file_name") or f"vertuu_deleted_{kind}.bin")
             if await self.send_saved_bytes_as_best_effort(owner_id, lang, kind, filename, cached_bytes, caption):
                 return True
             print(f"All saved-bytes delivery modes failed kind={kind}; trying file_id fallback", flush=True)
@@ -3341,7 +3423,7 @@ class BotHandlers:
             "sticker": "webp",
             "document": "bin",
         }
-        filename = f"ghostly_deleted_{kind}.{ext_map.get(kind, 'bin')}"
+        filename = f"vertuu_deleted_{kind}.{ext_map.get(kind, 'bin')}"
         try:
             file_info = await self.bot.get_file(file_id)
             file_path = str(file_info.get("file_path") or "")
@@ -3368,12 +3450,12 @@ class BotHandlers:
                         else "🎙 Видалене голосове конвертовано в MP3."
                     )
                     try:
-                        await self.bot.send_media_bytes(owner_id, "audio", f"ghostly_deleted_{kind}.mp3", mp3_bytes, mp3_caption)
+                        await self.bot.send_media_bytes(owner_id, "audio", f"vertuu_deleted_{kind}.mp3", mp3_bytes, mp3_caption)
                         return True
                     except Exception as exc:
                         print(f"MP3 audio upload fallback failed kind={kind}:", repr(exc))
                     try:
-                        await self.bot.send_media_bytes(owner_id, "document", f"ghostly_deleted_{kind}.mp3", mp3_bytes, mp3_caption)
+                        await self.bot.send_media_bytes(owner_id, "document", f"vertuu_deleted_{kind}.mp3", mp3_bytes, mp3_caption)
                         return True
                     except Exception as exc:
                         print(f"MP3 document upload fallback failed kind={kind}:", repr(exc))

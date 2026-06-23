@@ -1694,6 +1694,67 @@ UQDbfUbzkI8lfO6G1KAPB_F2Et2IRTM4EvFhX5ATaXYrjoV3""",
             )
             return dict(row)
 
+    async def extended_stats(self) -> dict[str, Any]:
+        async with self._pool().acquire() as con:
+            row = await con.fetchrow(
+                """
+                SELECT
+                  (SELECT COUNT(*) FROM users) AS users_total,
+                  (SELECT COUNT(*) FROM users WHERE created_at >= NOW() - INTERVAL '1 day') AS users_today,
+                  (SELECT COUNT(*) FROM users WHERE created_at >= NOW() - INTERVAL '7 days') AS users_7d,
+                  (SELECT COUNT(*) FROM users WHERE created_at >= NOW() - INTERVAL '30 days') AS users_30d,
+                  (SELECT COUNT(*) FROM users WHERE subscription_until > NOW()) AS subs_active,
+                  (SELECT COUNT(*) FROM users WHERE subscription_until IS NOT NULL AND subscription_until <= NOW()) AS subs_expired,
+                  (SELECT COUNT(*) FROM business_connections WHERE is_enabled=TRUE) AS connections_active,
+                  (SELECT COUNT(*) FROM business_connections) AS connections_total,
+                  (SELECT COUNT(*) FROM cached_messages) AS messages_total,
+                  (SELECT COUNT(*) FROM cached_messages WHERE deleted_at IS NOT NULL) AS messages_deleted,
+                  (SELECT COUNT(*) FROM cached_messages WHERE is_disappearing=TRUE) AS messages_disappearing,
+                  (SELECT COUNT(*) FROM deleted_events) AS deletions_total,
+                  (SELECT COUNT(*) FROM deleted_events WHERE delivered=TRUE) AS deletions_delivered,
+                  (SELECT COALESCE(SUM(amount_usd),0) FROM payments WHERE status='paid') AS revenue_total,
+                  (SELECT COALESCE(SUM(amount_usd),0) FROM payments WHERE status='paid' AND provider='ua_card') AS revenue_card,
+                  (SELECT COALESCE(SUM(amount_usd),0) FROM payments WHERE status='paid' AND provider='cryptobot') AS revenue_crypto,
+                  (SELECT COALESCE(SUM(amount_usd),0) FROM payments WHERE status='paid' AND provider='telegram_stars') AS revenue_stars,
+                  (SELECT COALESCE(SUM(amount_usd),0) FROM payments WHERE status='paid' AND provider IN ('usdt_trc20','usdt_bep20')) AS revenue_usdt,
+                  (SELECT COUNT(*) FROM payments WHERE status='paid') AS payments_paid_count,
+                  (SELECT COUNT(*) FROM payments WHERE status IN ('pending','waiting_admin') AND provider <> 'cryptobot') AS payments_pending,
+                  (SELECT COUNT(*) FROM payments WHERE status='rejected') AS payments_rejected,
+                  (SELECT COALESCE(SUM(amount_usd),0) FROM payments WHERE status='paid' AND created_at >= NOW() - INTERVAL '1 day') AS revenue_today,
+                  (SELECT COALESCE(SUM(amount_usd),0) FROM payments WHERE status='paid' AND created_at >= NOW() - INTERVAL '7 days') AS revenue_7d,
+                  (SELECT COALESCE(SUM(amount_usd),0) FROM payments WHERE status='paid' AND created_at >= NOW() - INTERVAL '30 days') AS revenue_30d,
+                  (SELECT COUNT(*) FROM user_keywords WHERE is_active=TRUE) AS keywords_active,
+                  (SELECT COUNT(DISTINCT owner_tg_id) FROM user_keywords WHERE is_active=TRUE) AS keywords_users
+                """
+            )
+            base = dict(row)
+
+            plan_rows = await con.fetch(
+                """
+                SELECT pl.name_uk AS name, COUNT(p.id) AS cnt,
+                       COALESCE(SUM(p.amount_usd),0) AS total
+                FROM payments p
+                JOIN plans pl ON pl.id=p.plan_id
+                WHERE p.status='paid'
+                GROUP BY pl.id, pl.name_uk, pl.position
+                ORDER BY pl.position ASC
+                """
+            )
+            base["plans_breakdown"] = [dict(r) for r in plan_rows]
+
+            ref_row = await con.fetchrow(
+                """
+                SELECT
+                  COUNT(*) AS rewards_count,
+                  COALESCE(SUM(reward_amount_usd),0) AS rewards_total,
+                  COALESCE(SUM(CASE WHEN status='available' THEN reward_amount_usd ELSE 0 END),0) AS rewards_available,
+                  COALESCE(SUM(CASE WHEN status='paid' THEN reward_amount_usd ELSE 0 END),0) AS rewards_paid
+                FROM referral_rewards
+                """
+            )
+            base["referrals"] = dict(ref_row)
+            return base
+
     async def set_setting(self, key: str, value: Any) -> None:
         async with self._pool().acquire() as con:
             await con.execute(
@@ -1873,7 +1934,7 @@ def extract_file_metadata(msg: dict[str, Any]) -> tuple[str | None, int | None, 
             "video_note": "mp4",
             "sticker": "webp",
         }.get(kind, "bin")
-        file_name = f"ghostly_{kind}.{ext}"
+        file_name = f"vertuu_{kind}.{ext}"
 
     if isinstance(data, dict):
         if data.get("file_name"):
