@@ -1547,7 +1547,7 @@ class BotHandlers:
                     await self.bot.delete_message(chat_id, message_id)
                 except Exception:
                     pass
-            caption = tr(lang, "connect", app=e(self.settings.app_name), bot_username=e(self._bot_username()))
+            caption = tr(lang, "connect", app=e(self.settings.app_name), bot_username=e(self.bot_username()))
             await self.bot.send_media_bytes(
                 tg_id,
                 "photo",
@@ -1579,7 +1579,7 @@ class BotHandlers:
         else:
             if await self.send_connect_card(tg_id, lang, edit):
                 return
-            text = tr(lang, "connect", app=e(self.settings.app_name), bot_username=e(self._bot_username()))
+            text = tr(lang, "connect", app=e(self.settings.app_name), bot_username=e(self.bot_username()))
             entities = None
             if video_url:
                 label = "🎬 Video guide" if lang == "en" else "🎬 Видео-инструкция" if lang == "ru" else "🎬 Відео-інструкція"
@@ -1662,7 +1662,7 @@ class BotHandlers:
                 else:
                     await self._send_or_edit(tg_id, rendered, plans_keyboard(lang, plans), edit, entities=ents)
                 return
-            lines = [tr(lang, "plans_title", app=e(self.settings.app_name), bot_username=e(self._bot_username())), *plan_lines]
+            lines = [tr(lang, "plans_title", app=e(self.settings.app_name), bot_username=e(self.bot_username())), *plan_lines]
             await self._send_or_edit(tg_id, "\n\n".join(lines), plans_keyboard(lang, plans), edit)
         except Exception as exc:
             print("show_plans error:", repr(exc), flush=True)
@@ -2738,7 +2738,7 @@ class BotHandlers:
             return False
 
         _file_name, _file_size, _mime_type, explicit_hint = extract_file_metadata(msg)
-        explicit_hint = bool(explicit_hint or self.raw_update_has_timer_hint(msg) or cached.get("is_disappearing"))
+        explicit_hint = bool(explicit_hint or self.raw_update_has_timer_hint(msg))
         if explicit_hint:
             return True
 
@@ -2824,7 +2824,7 @@ class BotHandlers:
             }, flush=True)
             return
 
-        explicit = bool(self.raw_update_has_timer_hint(msg) or row.get("is_disappearing"))
+        explicit = bool(self.raw_update_has_timer_hint(msg))
         if lang == "ru":
             title = "🔥 <b>Таймерное медиа сохранено</b>"
             note = "Я сразу сохранил это медиа, не ожидая удаления или окончания таймера."
@@ -3183,16 +3183,14 @@ class BotHandlers:
                             }, flush=True)
                             await self.db.mark_deleted_event(bc_id, owner_id, chat_id, int(message_id), None, data, False)
                             if await self.db.can_use_free_deleted(owner_id):
-                                if os.getenv("NOTIFY_MISSED_TIMER_MEDIA", "false").lower() in {"1", "true", "yes", "on"}:
-                                    msg = (
-                                        "⚠️ Таймерове/видалене медіа не вдалося показати: Telegram не передав свіжий файл. Старі фото/відео я не підставляю."
-                                        if lang == "uk"
-                                        else "⚠️ Таймерное/удалённое медиа не удалось показать: Telegram не передал свежий файл. Старые фото/видео я не подставляю."
-                                        if lang == "ru"
-                                        else "⚠️ Could not show timer/deleted media: Telegram did not pass a fresh file. I will not substitute older media."
-                                    )
-                                    await self.safe_send(owner_id, msg)
-                                    await self.db.consume_free_deleted(owner_id)
+                                chat_label = e(chat.get("title") or str(chat_id))
+                                msg = (
+                                    f"{tr(lang, 'deleted_title')}\n\n"
+                                    f"💬 <b>{tr(lang, 'chat')}:</b> {chat_label}\n\n"
+                                    f"{tr(lang, 'unknown_deleted')}"
+                                )
+                                await self.safe_send(owner_id, msg)
+                                await self.db.consume_free_deleted(owner_id)
                             continue
             print("Deleted event cached match", {
                 "deleted_message_id": int(message_id),

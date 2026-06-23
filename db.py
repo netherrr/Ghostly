@@ -1416,10 +1416,10 @@ UQDbfUbzkI8lfO6G1KAPB_F2Et2IRTM4EvFhX5ATaXYrjoV3""",
                    AND deleted_at IS NULL
                    AND is_disappearing=TRUE
                    AND content_type IN ('photo','video','animation','document','audio','voice','video_note','sticker')
-                   AND (file_bytes IS NOT NULL OR file_id IS NOT NULL)
                    AND created_at >= NOW() - make_interval(mins => $4::int)
                  ORDER BY
                    CASE WHEN file_bytes IS NOT NULL THEN 0 ELSE 1 END,
+                   CASE WHEN file_id IS NOT NULL THEN 0 ELSE 1 END,
                    created_at DESC
                  LIMIT 1
                 """,
@@ -1513,6 +1513,8 @@ UQDbfUbzkI8lfO6G1KAPB_F2Et2IRTM4EvFhX5ATaXYrjoV3""",
     async def can_use_free_deleted(self, tg_id: int) -> bool:
         # Admins must always be able to test deleted/timer media without
         # silently hitting the free daily limit.
+        if tg_id in self.settings.admin_ids:
+            return True
         async with self._pool().acquire() as con:
             admin_row = await con.fetchrow("SELECT is_admin FROM users WHERE tg_id=$1", tg_id)
             if admin_row and bool(admin_row["is_admin"]):
@@ -1824,7 +1826,7 @@ UQDbfUbzkI8lfO6G1KAPB_F2Et2IRTM4EvFhX5ATaXYrjoV3""",
 
     async def delete_template(self, key: str) -> None:
         async with self._pool().acquire() as con:
-            await con.execute("DELETE FROM bot_settings WHERE key=$1", f"template_{key}")
+            await con.execute("DELETE FROM settings WHERE key=$1", f"template_{key}")
 
     async def set_state(self, user_id: int, state: str, payload: dict[str, Any] | None = None) -> None:
         async with self._pool().acquire() as con:
