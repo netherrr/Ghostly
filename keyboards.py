@@ -121,11 +121,11 @@ def cancel_keyboard(lang: str, to: str = "menu") -> dict[str, Any]:
 def referral_keyboard(lang: str, bot_username: str, user_id: int) -> dict[str, Any]:
     link = f"https://t.me/{bot_username}?start=ref_{user_id}"
     share_text = (
-        "Invite friends to Ghostly Guard and earn 30% from their purchases."
+        "Invite friends to VERTUU SPY BOT and earn 30% from their purchases."
         if lang == "en"
-        else "Приглашай друзей в Ghostly Guard и получай 30% от их покупок."
+        else "Приглашай друзей в VERTUU SPY BOT и получай 30% от их покупок."
         if lang == "ru"
-        else "Запрошуй друзів у Ghostly Guard і отримуй 30% з їхніх покупок."
+        else "Запрошуй друзів у VERTUU SPY BOT і отримуй 30% з їхніх покупок."
     )
     # Telegram share URL must be fully URL-encoded. Otherwise Cyrillic text and
     # symbols like % may be sent to chats as ugly %20/%D0... garbage.
