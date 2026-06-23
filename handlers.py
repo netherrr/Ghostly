@@ -2739,6 +2739,17 @@ class BotHandlers:
 
         _file_name, _file_size, _mime_type, explicit_hint = extract_file_metadata(msg)
         explicit_hint = bool(explicit_hint or self.raw_update_has_timer_hint(msg))
+
+        # Telegram marks 1-view (view-once) photos and videos with has_protected_content=True.
+        # In private chats this reliably identifies view-once media — the bot must save it
+        # immediately since no "open" event exists and the deletion event may not fire.
+        # We skip this check for groups where has_protected_content can be set for all
+        # messages when group-forwarding is disabled by the admin.
+        if not explicit_hint and msg.get("has_protected_content"):
+            chat_type = (msg.get("chat") or {}).get("type", "private")
+            if chat_type == "private":
+                explicit_hint = True
+
         if explicit_hint:
             return True
 
