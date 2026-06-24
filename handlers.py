@@ -1908,7 +1908,7 @@ class BotHandlers:
 
 
     def bot_username(self) -> str:
-        return str(getattr(self.settings, "bot_username", None) or "VertuuSpyBot").lstrip("@")
+        return str(getattr(self.settings, "bot_username", None) or "vertuuSpyBot").lstrip("@")
 
     def referral_link(self, tg_id: int) -> str:
         return f"https://t.me/{self.bot_username()}?start=ref_{int(tg_id)}"
