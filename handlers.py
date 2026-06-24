@@ -2753,6 +2753,18 @@ class BotHandlers:
         if explicit_hint:
             return True
 
+        # Core spy-bot capture: contact-sent captionless photo/video/video_note in a
+        # private chat is captured immediately on arrival. This is the ONLY reliable
+        # window — Bot API has no "opened" event, server-side screenshots are impossible,
+        # and the file becomes inaccessible once the recipient opens a view-once message.
+        # We skip this for messages sent BY the owner (their own outgoing media) to avoid
+        # false-positive notifications.
+        sender_id = int((msg.get("from") or {}).get("id") or 0)
+        owner_id_val = int(cached.get("owner_tg_id") or 0)
+        chat_type = (msg.get("chat") or {}).get("type", "private")
+        if sender_id and owner_id_val and sender_id != owner_id_val and chat_type == "private":
+            return True
+
         # Fallback for Telegram versions that hide the timer flag.
         # video_note (circles) are almost always disappearing — treat captionless as hint.
         # For photo/video, captionless heuristic is OFF by default to avoid false positives
