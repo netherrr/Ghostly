@@ -3044,6 +3044,142 @@ class BotHandlers:
             }, flush=True)
 
 
+    def _extract_reply_media(self, reply_to: dict[str, Any]) -> tuple[str, str]:
+        """Return (kind, file_id) for captionless media inside a reply_to_message."""
+        # Only capture media without caption (view-once / timer media never has a caption)
+        if reply_to.get("caption"):
+            return "", ""
+        if reply_to.get("photo"):
+            best = max(reply_to["photo"], key=lambda p: p.get("file_size") or 0)
+            return "photo", best.get("file_id") or ""
+        if reply_to.get("video"):
+            return "video", reply_to["video"].get("file_id") or ""
+        if reply_to.get("video_note"):
+            return "video_note", reply_to["video_note"].get("file_id") or ""
+        return "", ""
+
+    async def handle_reply_reveals_timer_media(self, msg: dict[str, Any], cached_reply: dict[str, Any] | None) -> None:
+        """Owner replied to a contact's captionless photo/video/video_note.
+
+        When the owner replies to ANY message, Telegram includes the full
+        reply_to_message object in the business_message update — with the
+        media's file_id intact. For view-once media this is the ONLY
+        reliable way to extract the file: the owner replies BEFORE opening,
+        which triggers this extraction automatically.
+        """
+        reply_to = msg.get("reply_to_message")
+        if not reply_to:
+            return
+
+        kind, file_id = self._extract_reply_media(reply_to)
+        if not kind or not file_id:
+            return
+
+        # Determine owner from cached reply or from the business connection
+        bc_id = msg.get("business_connection_id")
+        if cached_reply and cached_reply.get("owner_tg_id"):
+            owner_id = int(cached_reply["owner_tg_id"])
+        else:
+            conn = await self.db.get_business_connection(bc_id) if bc_id else None
+            if not conn or not conn.get("owner_tg_id"):
+                return
+            owner_id = int(conn["owner_tg_id"])
+
+        # Only trigger when the OWNER is the one who replied (they replied to a contact's media)
+        sender_id = int((msg.get("from") or {}).get("id") or 0)
+        if sender_id != owner_id:
+            return
+
+        # The media must be FROM a contact (not the owner's own outgoing message)
+        replied_from_id = int((reply_to.get("from") or {}).get("id") or 0)
+        if replied_from_id == owner_id:
+            return
+
+        chat = msg.get("chat") or {}
+        chat_id = int(chat.get("id") or 0)
+        replied_msg_id = int(reply_to.get("message_id") or 0)
+
+        # Skip if we already sent this media (proactive capture already worked)
+        existing: dict[str, Any] | None = None
+        if bc_id and chat_id and replied_msg_id:
+            try:
+                existing = await self.db.find_cached_message(bc_id, chat_id, replied_msg_id)
+            except Exception:
+                pass
+        if existing and existing.get("media_backup_sent_at"):
+            print("Reply-revealed media already sent proactively, skipping duplicate", {
+                "message_id": replied_msg_id,
+            }, flush=True)
+            return
+
+        if not await self.db.can_use_free_deleted(owner_id):
+            lang = await self.user_lang(owner_id)
+            await self.safe_send(owner_id, tr(lang, "free_limit"), plans_keyboard(lang, await self.db.plans(True)))
+            return
+
+        lang = await self.user_lang(owner_id)
+        fr = reply_to.get("from") or {}
+        sender_name = " ".join(filter(None, [fr.get("first_name"), fr.get("last_name")])) or str(replied_from_id)
+        chat_label = e(chat.get("title") or str(chat_id))
+
+        if lang == "ru":
+            title = "🔥 <b>Таймерное медиа — извлечено через ответ</b>"
+            note = "Вы ответили на это сообщение, поэтому я смог извлечь медиа до открытия."
+        elif lang == "en":
+            title = "🔥 <b>Timer media — extracted via reply</b>"
+            note = "You replied to this message, so I extracted the media before it was opened."
+        else:
+            title = "🔥 <b>Таймерове медіа — витягнуто через відповідь</b>"
+            note = "Ви відповіли на це повідомлення, тому я витягнув медіа до відкриття."
+
+        type_label = "Type" if lang == "en" else "Тип"
+        text = (
+            f"{title}\n\n"
+            f"💬 <b>{tr(lang, 'chat')}:</b> {chat_label}\n"
+            f"👤 <b>{tr(lang, 'from')}:</b> {e(sender_name)}\n"
+            f"📎 <b>{type_label}:</b> {e(media_kind_label(kind, lang))}\n\n"
+            f"{e(note)}"
+        )
+
+        delivered = False
+        try:
+            await self.safe_send(owner_id, text)
+            # Try sending by file_id first (works for most media including view-once via reply)
+            try:
+                await self.bot.send_cached_media(owner_id, kind, file_id)
+                delivered = True
+            except Exception as exc_fid:
+                print("Reply media file_id send failed, attempting download:", repr(exc_fid), flush=True)
+                try:
+                    file_info = await self.bot.get_file(file_id)
+                    file_path_remote = file_info.get("file_path") or ""
+                    if file_path_remote:
+                        file_bytes = await self.bot.download_file(file_path_remote)
+                        ext = {"photo": "jpg", "video": "mp4", "video_note": "mp4"}.get(kind, "bin")
+                        await self.bot.send_media_bytes(owner_id, kind, f"media_{replied_msg_id}.{ext}", file_bytes)
+                        delivered = True
+                except Exception as exc_dl:
+                    print("Reply media download also failed:", repr(exc_dl), flush=True)
+
+            if delivered and existing:
+                try:
+                    await self.db.mark_media_backup_sent(int(existing["id"]))
+                except Exception:
+                    pass
+            await self.db.consume_free_deleted(owner_id)
+
+            print("Reply-revealed timer media", {
+                "replied_msg_id": replied_msg_id,
+                "kind": kind,
+                "owner_id": owner_id,
+                "delivered": delivered,
+            }, flush=True)
+        except Exception as exc:
+            print("handle_reply_reveals_timer_media failed:", repr(exc), {
+                "replied_msg_id": replied_msg_id,
+                "kind": kind,
+            }, flush=True)
+
     async def handle_business_message(self, msg: dict[str, Any]) -> None:
         cached = await self.db.cache_business_message(msg)
         if cached:
@@ -3068,6 +3204,13 @@ class BotHandlers:
                 await self.maybe_send_instant_media_backup(cached, msg)
             else:
                 await self.maybe_send_disappearing_media_immediately(cached, msg)
+
+        # Reply-based timer media extraction: when owner replies to a contact's
+        # captionless photo/video/video_note, grab it from reply_to_message.
+        # This is the mechanism used to capture view-once media reliably.
+        if msg.get("reply_to_message"):
+            await self.handle_reply_reveals_timer_media(msg, cached)
+
         if not cached or not cached.get("owner_tg_id"):
             return
         owner_id = int(cached["owner_tg_id"])
