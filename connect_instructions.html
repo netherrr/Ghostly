@@ -1,0 +1,746 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>VERTUU SPY BOT — Інструкція підключення</title>
+<link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet"/>
+<style>
+  :root {
+    --gold:        #c9a55a;
+    --gold-light:  #e8d08a;
+    --gold-dark:   #8b6f3a;
+    --gold-glow:   rgba(201,165,90,0.18);
+    --bg:          #090909;
+    --bg2:         #111111;
+    --bg3:         #181818;
+    --text:        #f0e2c8;
+    --text-dim:    #9a8a6a;
+    --border:      rgba(201,165,90,0.25);
+  }
+
+  *, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
+
+  body {
+    background: #000;
+    font-family: 'Montserrat', sans-serif;
+  }
+
+  /* ── CARD ─────────────────────────────────────────────── */
+  .card {
+    width: 1080px;
+    height: 1080px;
+    background: var(--bg);
+    position: relative;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: space-between;
+    padding: 54px 70px 50px;
+    margin: 0 auto 40px;
+  }
+
+  /* corner decorations */
+  .card::before, .card::after {
+    content: '';
+    position: absolute;
+    width: 160px; height: 160px;
+    border-color: var(--gold);
+    border-style: solid;
+    opacity: 0.35;
+  }
+  .card::before { top:28px; left:28px; border-width:1.5px 0 0 1.5px; }
+  .card::after  { bottom:28px; right:28px; border-width:0 1.5px 1.5px 0; }
+
+  /* radial glow behind illustration */
+  .glow {
+    position: absolute;
+    border-radius: 50%;
+    background: radial-gradient(circle, rgba(201,165,90,0.13) 0%, transparent 70%);
+    pointer-events: none;
+  }
+  .glow-center { width:700px; height:700px; top:50%; left:50%; transform:translate(-50%,-50%); }
+
+  /* ── HEADER ───────────────────────────────────────────── */
+  .header {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    z-index:10;
+  }
+
+  .logo-wrap {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+  }
+
+  .logo-icon {
+    width: 58px; height: 58px;
+    flex-shrink: 0;
+  }
+
+  .logo-text {
+    display: flex;
+    flex-direction: column;
+    line-height: 1;
+  }
+  .logo-text .name {
+    font-size: 18px;
+    font-weight: 800;
+    letter-spacing: 3px;
+    color: var(--gold);
+  }
+  .logo-text .sub {
+    font-size: 10px;
+    font-weight: 400;
+    letter-spacing: 5px;
+    color: var(--text-dim);
+    margin-top: 3px;
+  }
+
+  .step-badge {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 4px;
+  }
+  .step-badge .step-label {
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 4px;
+    color: var(--text-dim);
+    text-transform: uppercase;
+  }
+  .step-badge .step-num {
+    font-size: 54px;
+    font-weight: 900;
+    line-height: 1;
+    color: transparent;
+    -webkit-text-stroke: 1.5px var(--gold);
+    letter-spacing: -2px;
+  }
+
+  /* ── PHONE MOCKUP ─────────────────────────────────────── */
+  .phone-wrap {
+    position: relative;
+    z-index: 10;
+    margin: 0;
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .phone {
+    width: 295px;
+    background: #1c1c1e;
+    border-radius: 40px;
+    border: 1.5px solid rgba(255,255,255,0.1);
+    box-shadow:
+      0 0 0 6px #0f0f0f,
+      0 0 0 7.5px rgba(201,165,90,0.35),
+      0 40px 80px rgba(0,0,0,0.8),
+      inset 0 1px 0 rgba(255,255,255,0.06);
+    overflow: hidden;
+    position: relative;
+  }
+
+  /* notch */
+  .phone-notch {
+    height: 30px;
+    background: #1c1c1e;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+  }
+  .phone-notch::after {
+    content: '';
+    width: 90px; height: 18px;
+    background: #0a0a0a;
+    border-radius: 0 0 14px 14px;
+  }
+
+  /* status bar */
+  .status-bar {
+    background: #1c1c1e;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 18px 6px;
+    font-size: 10px;
+    color: rgba(255,255,255,0.7);
+    font-weight: 600;
+  }
+
+  /* screen */
+  .screen {
+    background: #1c1c1e;
+    min-height: 480px;
+  }
+
+  /* nav bar */
+  .nav-bar {
+    background: rgba(44,44,46,0.95);
+    padding: 14px 18px 10px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    border-bottom: 1px solid rgba(255,255,255,0.05);
+  }
+  .nav-back {
+    width: 22px; height: 22px;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .nav-title {
+    font-size: 13px;
+    font-weight: 700;
+    color: #fff;
+  }
+
+  /* menu items */
+  .menu-item {
+    display: flex;
+    align-items: center;
+    padding: 12px 18px;
+    gap: 14px;
+    border-bottom: 1px solid rgba(255,255,255,0.04);
+    position: relative;
+    transition: background 0.2s;
+  }
+  .menu-item.highlight {
+    background: rgba(201,165,90,0.12);
+  }
+  .menu-item.highlight::before {
+    content: '';
+    position: absolute;
+    left: 0; top: 0; bottom: 0;
+    width: 3px;
+    background: var(--gold);
+    border-radius: 0 2px 2px 0;
+  }
+
+  .mi-icon {
+    width: 32px; height: 32px;
+    border-radius: 9px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 15px;
+    flex-shrink: 0;
+  }
+  .mi-icon.blue   { background: #3478f6; }
+  .mi-icon.purple { background: #8e44ad; }
+  .mi-icon.green  { background: #27ae60; }
+  .mi-icon.orange { background: #e67e22; }
+  .mi-icon.gold   { background: linear-gradient(135deg,#c9a55a,#e8d08a); }
+  .mi-icon.teal   { background: #1abc9c; }
+
+  .mi-content { flex: 1; min-width: 0; }
+  .mi-label {
+    font-size: 12px;
+    font-weight: 500;
+    color: #fff;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .mi-sub {
+    font-size: 9.5px;
+    color: rgba(255,255,255,0.4);
+    margin-top: 1px;
+  }
+  .mi-arrow {
+    font-size: 10px;
+    color: rgba(255,255,255,0.25);
+  }
+  .mi-tag {
+    font-size: 9px;
+    font-weight: 700;
+    color: var(--bg);
+    background: var(--gold);
+    padding: 2px 7px;
+    border-radius: 20px;
+    letter-spacing: 0.5px;
+  }
+
+  .section-header {
+    padding: 14px 18px 6px;
+    font-size: 9.5px;
+    font-weight: 600;
+    letter-spacing: 1.5px;
+    color: rgba(255,255,255,0.3);
+    text-transform: uppercase;
+  }
+
+  /* search bar */
+  .search-bar {
+    margin: 10px 14px;
+    background: rgba(255,255,255,0.08);
+    border-radius: 12px;
+    padding: 8px 14px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .search-bar span { font-size: 11px; color: rgba(255,255,255,0.35); }
+
+  /* bot result */
+  .bot-result {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 16px;
+    background: rgba(201,165,90,0.1);
+    border-bottom: 1px solid rgba(201,165,90,0.15);
+  }
+  .bot-avatar {
+    width: 42px; height: 42px;
+    border-radius: 50%;
+    background: #0a0a0a;
+    border: 1.5px solid var(--gold);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 10px;
+    font-weight: 800;
+    color: var(--gold);
+    letter-spacing: 0.5px;
+  }
+  .bot-name { font-size: 12px; font-weight: 700; color: #fff; }
+  .bot-username { font-size: 10px; color: rgba(255,255,255,0.4); margin-top:2px; }
+  .bot-verified { color: var(--gold); font-size:9px; margin-top:3px; font-weight:600; }
+
+  .connect-btn {
+    margin: 16px;
+    background: linear-gradient(135deg, var(--gold-dark), var(--gold));
+    border-radius: 14px;
+    padding: 13px;
+    text-align: center;
+    font-size: 12px;
+    font-weight: 700;
+    color: #000;
+    letter-spacing: 0.5px;
+  }
+
+  /* success screen */
+  .success-screen {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 40px 20px;
+    gap: 14px;
+    min-height: 360px;
+  }
+  .success-icon {
+    width: 72px; height: 72px;
+    border-radius: 50%;
+    background: linear-gradient(135deg,#1a4a1a,#2d7a2d);
+    border: 2px solid #4caf50;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 32px;
+  }
+  .success-title { font-size: 14px; font-weight: 800; color: #fff; text-align:center; }
+  .success-sub   { font-size: 10.5px; color: rgba(255,255,255,0.4); text-align:center; line-height:1.5; }
+
+  /* ── BOTTOM ───────────────────────────────────────────── */
+  .bottom {
+    width: 100%;
+    z-index: 10;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 20px;
+  }
+
+  .divider {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+  }
+  .divider-line { flex: 1; height: 1px; background: var(--border); }
+  .divider-diamond {
+    width: 6px; height: 6px;
+    background: var(--gold);
+    transform: rotate(45deg);
+    flex-shrink: 0;
+  }
+
+  .step-title {
+    font-size: 26px;
+    font-weight: 800;
+    color: var(--text);
+    text-align: center;
+    letter-spacing: -0.5px;
+    line-height: 1.2;
+  }
+  .step-title .accent { color: var(--gold); }
+
+  .step-desc {
+    font-size: 14px;
+    font-weight: 400;
+    color: var(--text-dim);
+    text-align: center;
+    line-height: 1.7;
+    max-width: 720px;
+  }
+
+  .dots {
+    display: flex;
+    gap: 8px;
+    margin-top: 4px;
+  }
+  .dot {
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: var(--text-dim);
+    opacity: 0.4;
+  }
+  .dot.active {
+    width: 22px;
+    border-radius: 3px;
+    background: var(--gold);
+    opacity: 1;
+  }
+
+  /* ── SVG LOGO ─────────────────────────────────────────── */
+  .logo-svg-icon {
+    width: 58px; height: 58px;
+  }
+
+  /* horizontal lines decoration */
+  .h-lines {
+    position: absolute;
+    right: 0; top: 50%;
+    transform: translateY(-50%);
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    opacity: 0.06;
+  }
+  .h-line { height: 1px; background: var(--gold); }
+
+  .v-lines {
+    position: absolute;
+    bottom: 0; left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    gap: 6px;
+    opacity: 0.06;
+  }
+  .v-line { width: 1px; background: var(--gold); }
+
+  /* page break hint */
+  .page-break { page-break-after: always; }
+</style>
+</head>
+<body>
+
+<!-- ═══════════════════════════════════════════════════════
+     CARD 1 — Відкрийте налаштування Telegram
+════════════════════════════════════════════════════════ -->
+<div class="card" id="card1">
+  <div class="glow glow-center"></div>
+
+  <!-- decorative lines -->
+  <div class="h-lines">
+    <div class="h-line" style="width:300px"></div><div class="h-line" style="width:200px"></div>
+    <div class="h-line" style="width:350px"></div><div class="h-line" style="width:150px"></div>
+    <div class="h-line" style="width:280px"></div><div class="h-line" style="width:220px"></div>
+    <div class="h-line" style="width:320px"></div><div class="h-line" style="width:180px"></div>
+  </div>
+
+  <!-- HEADER -->
+  <div class="header">
+    <div class="logo-wrap">
+      <svg class="logo-svg-icon" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <circle cx="50" cy="50" r="48" stroke="#c9a55a" stroke-width="1.5" fill="#0a0a0a"/>
+        <polygon points="50,15 88,75 12,75" stroke="#c9a55a" stroke-width="1.5" fill="none"/>
+        <!-- eye -->
+        <ellipse cx="50" cy="52" rx="14" ry="9" stroke="#c9a55a" stroke-width="1.2" fill="none"/>
+        <circle cx="50" cy="52" r="5" fill="#c9a55a" opacity="0.9"/>
+        <circle cx="52" cy="50" r="2" fill="#0a0a0a"/>
+        <!-- magnifier -->
+        <circle cx="55" cy="47" r="10" stroke="#c9a55a" stroke-width="1.5" fill="none"/>
+        <line x1="62" y1="54" x2="70" y2="62" stroke="#c9a55a" stroke-width="2.5" stroke-linecap="round"/>
+        <!-- rays -->
+        <line x1="50" y1="15" x2="50" y2="8"  stroke="#c9a55a" stroke-width="1" opacity="0.5"/>
+        <line x1="50" y1="15" x2="44" y2="9"  stroke="#c9a55a" stroke-width="0.8" opacity="0.4"/>
+        <line x1="50" y1="15" x2="56" y2="9"  stroke="#c9a55a" stroke-width="0.8" opacity="0.4"/>
+      </svg>
+      <div class="logo-text">
+        <span class="name">VERTUU</span>
+        <span class="sub">— SPY BOT —</span>
+      </div>
+    </div>
+    <div class="step-badge">
+      <span class="step-label">Крок</span>
+      <span class="step-num">01</span>
+    </div>
+  </div>
+
+  <!-- PHONE -->
+  <div class="phone-wrap">
+    <div class="phone">
+      <div class="phone-notch"></div>
+      <div class="status-bar">
+        <span>9:41</span>
+        <span>●●●</span>
+      </div>
+      <div class="screen">
+        <div class="nav-bar">
+          <div class="nav-title" style="font-size:15px;font-weight:800;width:100%;text-align:left;">Налаштування</div>
+        </div>
+
+        <!-- profile row -->
+        <div class="menu-item" style="padding:14px 18px;gap:14px;border-bottom:1px solid rgba(255,255,255,0.07);margin-bottom:6px;">
+          <div style="width:44px;height:44px;border-radius:50%;background:linear-gradient(135deg,#3478f6,#5ac8fa);flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:16px;font-weight:800;color:#fff;">В</div>
+          <div>
+            <div style="font-size:13px;font-weight:700;color:#fff;">Ваш акаунт</div>
+            <div style="font-size:10px;color:rgba(255,255,255,0.4);">@yourusername</div>
+          </div>
+        </div>
+
+        <div class="section-header">Загальні</div>
+        <div class="menu-item">
+          <div class="mi-icon blue">🔔</div>
+          <div class="mi-content"><div class="mi-label">Сповіщення</div></div>
+          <div class="mi-arrow">›</div>
+        </div>
+        <div class="menu-item">
+          <div class="mi-icon purple">🔒</div>
+          <div class="mi-content"><div class="mi-label">Конфіденційність</div></div>
+          <div class="mi-arrow">›</div>
+        </div>
+        <div class="menu-item">
+          <div class="mi-icon teal">💬</div>
+          <div class="mi-content"><div class="mi-label">Чати</div></div>
+          <div class="mi-arrow">›</div>
+        </div>
+
+        <div class="section-header">Бізнес</div>
+        <div class="menu-item highlight">
+          <div class="mi-icon gold">💼</div>
+          <div class="mi-content">
+            <div class="mi-label">Telegram Business</div>
+            <div class="mi-sub">Чат-боти, розклад, вітання</div>
+          </div>
+          <div class="mi-tag">ТУТ</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- BOTTOM -->
+  <div class="bottom">
+    <div class="divider"><div class="divider-line"></div><div class="divider-diamond"></div><div class="divider-line"></div></div>
+    <div class="step-title">Відкрийте <span class="accent">Telegram Business</span><br>у налаштуваннях</div>
+    <div class="step-desc">Перейдіть до Налаштування → прокрутіть донизу до розділу <strong style="color:var(--text)">«Бізнес»</strong> → натисніть <strong style="color:var(--text)">Telegram Business</strong></div>
+    <div class="dots">
+      <div class="dot active"></div>
+      <div class="dot"></div>
+      <div class="dot"></div>
+    </div>
+  </div>
+</div>
+
+
+<!-- ═══════════════════════════════════════════════════════
+     CARD 2 — Розділ Чат-боти
+════════════════════════════════════════════════════════ -->
+<div class="card" id="card2">
+  <div class="glow glow-center"></div>
+
+  <div class="h-lines">
+    <div class="h-line" style="width:300px"></div><div class="h-line" style="width:200px"></div>
+    <div class="h-line" style="width:350px"></div><div class="h-line" style="width:150px"></div>
+    <div class="h-line" style="width:280px"></div><div class="h-line" style="width:220px"></div>
+    <div class="h-line" style="width:320px"></div><div class="h-line" style="width:180px"></div>
+  </div>
+
+  <div class="header">
+    <div class="logo-wrap">
+      <svg class="logo-svg-icon" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <circle cx="50" cy="50" r="48" stroke="#c9a55a" stroke-width="1.5" fill="#0a0a0a"/>
+        <polygon points="50,15 88,75 12,75" stroke="#c9a55a" stroke-width="1.5" fill="none"/>
+        <ellipse cx="50" cy="52" rx="14" ry="9" stroke="#c9a55a" stroke-width="1.2" fill="none"/>
+        <circle cx="50" cy="52" r="5" fill="#c9a55a" opacity="0.9"/>
+        <circle cx="52" cy="50" r="2" fill="#0a0a0a"/>
+        <circle cx="55" cy="47" r="10" stroke="#c9a55a" stroke-width="1.5" fill="none"/>
+        <line x1="62" y1="54" x2="70" y2="62" stroke="#c9a55a" stroke-width="2.5" stroke-linecap="round"/>
+        <line x1="50" y1="15" x2="50" y2="8"  stroke="#c9a55a" stroke-width="1" opacity="0.5"/>
+        <line x1="50" y1="15" x2="44" y2="9"  stroke="#c9a55a" stroke-width="0.8" opacity="0.4"/>
+        <line x1="50" y1="15" x2="56" y2="9"  stroke="#c9a55a" stroke-width="0.8" opacity="0.4"/>
+      </svg>
+      <div class="logo-text">
+        <span class="name">VERTUU</span>
+        <span class="sub">— SPY BOT —</span>
+      </div>
+    </div>
+    <div class="step-badge">
+      <span class="step-label">Крок</span>
+      <span class="step-num">02</span>
+    </div>
+  </div>
+
+  <div class="phone-wrap">
+    <div class="phone">
+      <div class="phone-notch"></div>
+      <div class="status-bar"><span>9:41</span><span>●●●</span></div>
+      <div class="screen">
+        <div class="nav-bar">
+          <div class="nav-back">
+            <svg width="10" height="16" viewBox="0 0 10 16"><path d="M8 2L2 8l6 6" stroke="#c9a55a" stroke-width="2" fill="none" stroke-linecap="round"/></svg>
+          </div>
+          <div class="nav-title">Telegram Business</div>
+        </div>
+
+        <div class="section-header">Профіль</div>
+        <div class="menu-item">
+          <div class="mi-icon blue">⏰</div>
+          <div class="mi-content"><div class="mi-label">Години роботи</div></div>
+          <div class="mi-arrow">›</div>
+        </div>
+        <div class="menu-item">
+          <div class="mi-icon green">👋</div>
+          <div class="mi-content"><div class="mi-label">Вітальне повідомлення</div></div>
+          <div class="mi-arrow">›</div>
+        </div>
+        <div class="menu-item">
+          <div class="mi-icon orange">💬</div>
+          <div class="mi-content"><div class="mi-label">Швидкі відповіді</div></div>
+          <div class="mi-arrow">›</div>
+        </div>
+
+        <div class="section-header">Автоматизація</div>
+        <div class="menu-item highlight">
+          <div class="mi-icon gold">🤖</div>
+          <div class="mi-content">
+            <div class="mi-label">Чат-боти</div>
+            <div class="mi-sub">Підключити бота до акаунту</div>
+          </div>
+          <div class="mi-tag">ТУТ</div>
+        </div>
+        <div class="menu-item">
+          <div class="mi-icon purple">📍</div>
+          <div class="mi-content"><div class="mi-label">Адреса</div></div>
+          <div class="mi-arrow">›</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="bottom">
+    <div class="divider"><div class="divider-line"></div><div class="divider-diamond"></div><div class="divider-line"></div></div>
+    <div class="step-title">Натисніть на розділ<br><span class="accent">«Чат-боти»</span></div>
+    <div class="step-desc">Всередині Telegram Business знайдіть пункт <strong style="color:var(--text)">«Чат-боти»</strong> і натисніть на нього, щоб додати бота до вашого бізнес-акаунту</div>
+    <div class="dots">
+      <div class="dot"></div>
+      <div class="dot active"></div>
+      <div class="dot"></div>
+    </div>
+  </div>
+</div>
+
+
+<!-- ═══════════════════════════════════════════════════════
+     CARD 3 — Підключіть бота
+════════════════════════════════════════════════════════ -->
+<div class="card" id="card3">
+  <div class="glow glow-center"></div>
+
+  <div class="h-lines">
+    <div class="h-line" style="width:300px"></div><div class="h-line" style="width:200px"></div>
+    <div class="h-line" style="width:350px"></div><div class="h-line" style="width:150px"></div>
+    <div class="h-line" style="width:280px"></div><div class="h-line" style="width:220px"></div>
+    <div class="h-line" style="width:320px"></div><div class="h-line" style="width:180px"></div>
+  </div>
+
+  <div class="header">
+    <div class="logo-wrap">
+      <svg class="logo-svg-icon" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <circle cx="50" cy="50" r="48" stroke="#c9a55a" stroke-width="1.5" fill="#0a0a0a"/>
+        <polygon points="50,15 88,75 12,75" stroke="#c9a55a" stroke-width="1.5" fill="none"/>
+        <ellipse cx="50" cy="52" rx="14" ry="9" stroke="#c9a55a" stroke-width="1.2" fill="none"/>
+        <circle cx="50" cy="52" r="5" fill="#c9a55a" opacity="0.9"/>
+        <circle cx="52" cy="50" r="2" fill="#0a0a0a"/>
+        <circle cx="55" cy="47" r="10" stroke="#c9a55a" stroke-width="1.5" fill="none"/>
+        <line x1="62" y1="54" x2="70" y2="62" stroke="#c9a55a" stroke-width="2.5" stroke-linecap="round"/>
+        <line x1="50" y1="15" x2="50" y2="8"  stroke="#c9a55a" stroke-width="1" opacity="0.5"/>
+        <line x1="50" y1="15" x2="44" y2="9"  stroke="#c9a55a" stroke-width="0.8" opacity="0.4"/>
+        <line x1="50" y1="15" x2="56" y2="9"  stroke="#c9a55a" stroke-width="0.8" opacity="0.4"/>
+      </svg>
+      <div class="logo-text">
+        <span class="name">VERTUU</span>
+        <span class="sub">— SPY BOT —</span>
+      </div>
+    </div>
+    <div class="step-badge">
+      <span class="step-label">Крок</span>
+      <span class="step-num">03</span>
+    </div>
+  </div>
+
+  <div class="phone-wrap">
+    <div class="phone">
+      <div class="phone-notch"></div>
+      <div class="status-bar"><span>9:41</span><span>●●●</span></div>
+      <div class="screen">
+        <div class="nav-bar">
+          <div class="nav-back">
+            <svg width="10" height="16" viewBox="0 0 10 16"><path d="M8 2L2 8l6 6" stroke="#c9a55a" stroke-width="2" fill="none" stroke-linecap="round"/></svg>
+          </div>
+          <div class="nav-title">Чат-боти</div>
+        </div>
+
+        <div class="search-bar">
+          <span>🔍</span>
+          <span>Пошук боту...</span>
+        </div>
+
+        <div class="section-header">Результат пошуку</div>
+
+        <div class="bot-result">
+          <div class="bot-avatar">VS</div>
+          <div style="flex:1;">
+            <div class="bot-name">VERTUU SPY BOT</div>
+            <div class="bot-username">@vertuu_spy_bot</div>
+            <div class="bot-verified">✦ Верифікований бот</div>
+          </div>
+          <div style="width:28px;height:28px;border-radius:50%;background:linear-gradient(135deg,#1a4a1a,#2d7a2d);border:1.5px solid #4caf50;display:flex;align-items:center;justify-content:center;font-size:13px;">✓</div>
+        </div>
+
+        <div class="section-header" style="margin-top:4px;">Дозволи</div>
+        <div class="menu-item">
+          <div style="flex:1;font-size:11px;color:rgba(255,255,255,0.6);line-height:1.5;">Бот матиме доступ до вхідних та вихідних повідомлень у ваших бізнес-чатах</div>
+        </div>
+
+        <div class="connect-btn">Підключити бота ✓</div>
+
+        <!-- success overlay hint -->
+        <div style="margin:0 16px 16px;background:rgba(76,175,80,0.1);border:1px solid rgba(76,175,80,0.3);border-radius:12px;padding:10px 14px;display:flex;align-items:center;gap:10px;">
+          <span style="font-size:18px;">🎉</span>
+          <div>
+            <div style="font-size:10.5px;font-weight:700;color:#4caf50;">Бот успішно підключено!</div>
+            <div style="font-size:9px;color:rgba(255,255,255,0.35);margin-top:2px;">Моніторинг активовано</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="bottom">
+    <div class="divider"><div class="divider-line"></div><div class="divider-diamond"></div><div class="divider-line"></div></div>
+    <div class="step-title">Знайдіть та підключіть<br><span class="accent">@vertuu_spy_bot</span></div>
+    <div class="step-desc">Введіть <strong style="color:var(--text)">@vertuu_spy_bot</strong> у рядку пошуку → натисніть на бота → підтвердіть підключення.<br>Готово — моніторинг активовано!</div>
+    <div class="dots">
+      <div class="dot"></div>
+      <div class="dot"></div>
+      <div class="dot active"></div>
+    </div>
+  </div>
+</div>
+
+</body>
+</html>
