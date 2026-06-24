@@ -99,3 +99,12 @@ window.addEventListener('scroll', () => {
     link.classList.toggle('active', link.getAttribute('href') === `#${current}`);
   });
 }, { passive: true });
+
+// Scroll to top button
+const scrollTopBtn = document.getElementById('scrollTop');
+window.addEventListener('scroll', () => {
+  scrollTopBtn.classList.toggle('visible', window.scrollY > 400);
+}, { passive: true });
+scrollTopBtn.addEventListener('click', () => {
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+});
