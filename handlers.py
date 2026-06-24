@@ -679,12 +679,13 @@ def edit_content_from_message(msg: dict[str, Any]) -> tuple[str, list[dict[str, 
     """
     text, entities = message_text_and_entities(msg)
     media = extract_message_attachment(msg)
-    if media.get("kind") not in {"photo", "video", "animation", "document", "sticker"} or not media.get("file_id"):
+    supported_media = {"photo", "video", "animation", "document", "sticker", "audio", "voice", "video_note"}
+    if media.get("kind") not in supported_media or not media.get("file_id"):
         media_obj = None
     else:
         media_obj = {"kind": media.get("kind"), "file_id": media.get("file_id")}
-        if media.get("kind") == "sticker":
-            # Telegram stickers cannot have captions. Keep it as media-only.
+        if media.get("kind") in {"sticker", "video_note"}:
+            # Telegram stickers and video notes cannot carry a caption.
             text, entities = "", []
     return text, entities, media_obj
 
@@ -1167,7 +1168,18 @@ class BotHandlers:
         else:
             await self.show_menu_screen(tg_id, lang, is_admin)
 
-    async def resolve_edit_template_key(self, target: dict[str, Any], lang: str) -> str | None:
+    async def resolve_edit_template_key(self, target: dict[str, Any], lang: str, chat_id: int | None = None) -> str | None:
+        # 1. Deterministic resolution: did this bot send this exact message as a
+        # known template? This is reliable even when the screen text was heavily
+        # customized with Premium emoji, and it fixes editing the wrong screen.
+        message_id = target.get("message_id")
+        if chat_id is not None and message_id:
+            recorded = await self.db.get_sent_template_key(chat_id, int(message_id))
+            if recorded:
+                return recorded
+
+        # 2. Fallback: heuristic detection for old messages sent before tracking
+        # existed, or messages the bot never recorded.
         key = detect_template_from_target(target, lang)
 
         # Manual payment screens must be editable per payment method.
@@ -1209,13 +1221,14 @@ class BotHandlers:
             await self.bot.send_message(tg_id, "⚠️ Я можу редагувати тільки повідомлення, які надіслав цей бот.")
             return
 
+        target_chat_id = int((msg.get("chat") or {}).get("id", tg_id))
         new_text, entities, _ = command_payload_from_message(msg)
         template_key, new_text, entities = parse_template_prefix(new_text, entities, lang)
-        auto_template_key = await self.resolve_edit_template_key(target, lang)
+        auto_template_key = await self.resolve_edit_template_key(target, lang, chat_id=target_chat_id)
         if not template_key:
             template_key = auto_template_key
         payload = {
-            "target_chat_id": int((msg.get("chat") or {}).get("id", tg_id)),
+            "target_chat_id": target_chat_id,
             "target_message_id": int(target["message_id"]),
             "mode": target_edit_mode(target),
             "reply_markup": target.get("reply_markup"),
@@ -1302,7 +1315,7 @@ class BotHandlers:
                         await self.bot.delete_message(target_chat_id, target_message_id)
                     except Exception:
                         pass
-                await self.send_template_content(tg_id, text, entities or [], media, reply_markup)
+                await self.send_template_content(tg_id, text, entities or [], media, reply_markup, track_key=str(template_key) if template_key else None)
             else:
                 if mode == "caption" and template_key:
                     # Admin is turning a media screen back into a text-only template.
@@ -1311,11 +1324,15 @@ class BotHandlers:
                         await self.bot.delete_message(target_chat_id, target_message_id)
                     except Exception:
                         pass
-                    await self.send_template_content(tg_id, text, entities or [], None, reply_markup)
+                    await self.send_template_content(tg_id, text, entities or [], None, reply_markup, track_key=str(template_key))
                 elif mode == "caption":
                     await self.bot.edit_message_caption(target_chat_id, target_message_id, text, reply_markup=reply_markup, caption_entities=entities or [])
+                    if template_key:
+                        await self.db.record_sent_template(target_chat_id, target_message_id, str(template_key))
                 else:
                     await self.bot.edit_message_text(target_chat_id, target_message_id, text, reply_markup=reply_markup, entities=entities or [])
+                    if template_key:
+                        await self.db.record_sent_template(target_chat_id, target_message_id, str(template_key))
 
             if template_key:
                 await self.db.set_template(str(template_key), text, entities or [], media)
@@ -1440,11 +1457,13 @@ class BotHandlers:
             await self.bot.send_message(tg_id, f"❌ Помилка:\n<code>{e(repr(exc))}</code>", cancel_keyboard(lang, "admin" if is_admin else "menu"))
 
     async def show_start(self, tg_id: int, lang: str, is_admin: bool) -> None:
-        tpl = await self.db.get_template(f"start_{lang}")
+        key = f"start_{lang}"
+        tpl = await self.db.get_template(key)
         if tpl:
-            await self.send_template_screen(tg_id, tpl, main_menu(lang, is_admin))
+            await self.send_template_screen(tg_id, tpl, main_menu(lang, is_admin), track_key=key)
             return
-        await self.bot.send_message(tg_id, tr(lang, "start", app=e(self.settings.app_name)), main_menu(lang, is_admin))
+        result = await self.bot.send_message(tg_id, tr(lang, "start", app=e(self.settings.app_name)), main_menu(lang, is_admin))
+        await self.track_sent(result, tg_id, key)
 
     def support_text(self, lang: str) -> str:
         if lang == "ru":
@@ -1520,18 +1539,20 @@ class BotHandlers:
 
 
     async def show_menu_screen(self, tg_id: int, lang: str, is_admin: bool, edit: tuple[int, int] | None = None) -> None:
-        tpl = await self.db.get_template(f"menu_{lang}")
+        key = f"menu_{lang}"
+        tpl = await self.db.get_template(key)
         if tpl:
-            await self.send_template_screen(tg_id, tpl, main_menu(lang, is_admin), edit)
+            await self.send_template_screen(tg_id, tpl, main_menu(lang, is_admin), edit, track_key=key)
             return
-        await self._send_or_edit(tg_id, tr(lang, "menu", app=e(self.settings.app_name)), main_menu(lang, is_admin), edit)
+        await self._send_or_edit(tg_id, tr(lang, "menu", app=e(self.settings.app_name)), main_menu(lang, is_admin), edit, track_key=key)
 
     async def show_language_screen(self, tg_id: int, lang: str, edit: tuple[int, int] | None = None) -> None:
-        tpl = await self.db.get_template(f"choose_lang_{lang}")
+        key = f"choose_lang_{lang}"
+        tpl = await self.db.get_template(key)
         if tpl:
-            await self.send_template_screen(tg_id, tpl, lang_keyboard(), edit)
+            await self.send_template_screen(tg_id, tpl, lang_keyboard(), edit, track_key=key)
             return
-        await self._send_or_edit(tg_id, tr(lang, "choose_lang"), lang_keyboard(), edit)
+        await self._send_or_edit(tg_id, tr(lang, "choose_lang"), lang_keyboard(), edit, track_key=key)
 
 
     async def send_connect_card(self, tg_id: int, lang: str, edit: tuple[int, int] | None = None) -> bool:
@@ -1562,7 +1583,7 @@ class BotHandlers:
             # Strip the first line so wrong APP_NAME env never leaks into the caption.
             parts = full_caption.split("\n\n", 1)
             caption = parts[1] if len(parts) > 1 else full_caption
-            await self.bot.send_media_bytes(
+            result = await self.bot.send_media_bytes(
                 tg_id,
                 "photo",
                 asset_path.name,
@@ -1570,6 +1591,7 @@ class BotHandlers:
                 caption[:1024],
                 back_menu(lang),
             )
+            await self.track_sent(result, tg_id, f"connect_{lang}")
             return True
         except Exception as exc:
             print("send_connect_card failed:", repr(exc), flush=True)
@@ -1581,7 +1603,8 @@ class BotHandlers:
         uah_rate = await self.db.get_setting("uah_rate", 42)
         video_file_id = await self.db.get_setting("connect_video_file_id", "")
         video_kind = await self.db.get_setting("connect_video_kind", "video")
-        tpl = await self.db.get_template(f"connect_{lang}")
+        key = f"connect_{lang}"
+        tpl = await self.db.get_template(key)
         if tpl:
             # Custom connect template may include its own photo/video.
             if video_url and not tpl.get("media"):
@@ -1589,7 +1612,7 @@ class BotHandlers:
                 tpl = dict(tpl)
                 tpl["text"] = f"{tpl.get('text') or ''}\n\n{label}: {e(video_url)}"
                 tpl["entities"] = []
-            await self.send_template_screen(tg_id, tpl, back_menu(lang), edit)
+            await self.send_template_screen(tg_id, tpl, back_menu(lang), edit, track_key=key)
         else:
             if await self.send_connect_card(tg_id, lang, edit):
                 return
@@ -1599,7 +1622,7 @@ class BotHandlers:
                 label = "🎬 Video guide" if lang == "en" else "🎬 Видео-инструкция" if lang == "ru" else "🎬 Відео-інструкція"
                 text += f"\n\n{label}: {e(video_url)}"
                 entities = None
-            await self._send_or_edit(tg_id, text, back_menu(lang), edit, entities=entities)
+            await self._send_or_edit(tg_id, text, back_menu(lang), edit, entities=entities, track_key=key)
         if video_file_id:
             caption = "🎬 Video guide" if lang == "en" else "🎬 Видео-инструкция" if lang == "ru" else "🎬 Відео-інструкція"
             try:
@@ -1618,7 +1641,8 @@ class BotHandlers:
         business_status = tr(lang, "business_on") if has_business else tr(lang, "business_off")
         hint = tr(lang, "status_hint_ok") if has_business else tr(lang, "status_hint_connect")
 
-        tpl = await self.db.get_template(f"status_{lang}")
+        key = f"status_{lang}"
+        tpl = await self.db.get_template(key)
         if tpl:
             values = {
                 "plan_name": sub_status,
@@ -1636,13 +1660,13 @@ class BotHandlers:
                         await self.bot.delete_message(chat_id, message_id)
                     except Exception:
                         pass
-                await self.send_template_content(tg_id, rendered, ents, media, back_menu(lang))
+                await self.send_template_content(tg_id, rendered, ents, media, back_menu(lang), track_key=key)
             else:
-                await self._send_or_edit(tg_id, rendered, back_menu(lang), edit, entities=ents)
+                await self._send_or_edit(tg_id, rendered, back_menu(lang), edit, entities=ents, track_key=key)
             return
 
         text = tr(lang, "status", sub_status=e(sub_status), business_status=e(business_status), saved=saved, deleted=deleted, hint=e(hint))
-        await self._send_or_edit(tg_id, text, back_menu(lang), edit)
+        await self._send_or_edit(tg_id, text, back_menu(lang), edit, track_key=key)
 
     async def show_plans(self, tg_id: int, lang: str, edit: tuple[int, int] | None = None) -> None:
         try:
@@ -1660,7 +1684,8 @@ class BotHandlers:
                 )
                 await self._send_or_edit(tg_id, no_plans, back_menu(lang), edit)
                 return
-            tpl = await self.db.get_template(f"plans_{lang}")
+            key = f"plans_{lang}"
+            tpl = await self.db.get_template(key)
             if tpl:
                 values = {"plans_list": "\n\n".join(plan_lines)}
                 rendered, ents = render_dynamic_template(str(tpl.get("text") or ""), tpl.get("entities") or [], values)
@@ -1672,12 +1697,12 @@ class BotHandlers:
                             await self.bot.delete_message(chat_id, message_id)
                         except Exception:
                             pass
-                    await self.send_template_content(tg_id, rendered, ents, media, plans_keyboard(lang, plans))
+                    await self.send_template_content(tg_id, rendered, ents, media, plans_keyboard(lang, plans), track_key=key)
                 else:
-                    await self._send_or_edit(tg_id, rendered, plans_keyboard(lang, plans), edit, entities=ents)
+                    await self._send_or_edit(tg_id, rendered, plans_keyboard(lang, plans), edit, entities=ents, track_key=key)
                 return
             lines = [tr(lang, "plans_title", app=e(self.settings.app_name), bot_username=e(self.bot_username())), *plan_lines]
-            await self._send_or_edit(tg_id, "\n\n".join(lines), plans_keyboard(lang, plans), edit)
+            await self._send_or_edit(tg_id, "\n\n".join(lines), plans_keyboard(lang, plans), edit, track_key=f"plans_{lang}")
         except Exception as exc:
             print("show_plans error:", repr(exc), flush=True)
             await self.safe_send(tg_id, "❌ Не вдалося завантажити тарифи. Спробуй /plans ще раз або напиши підтримці.")
@@ -1695,7 +1720,8 @@ class BotHandlers:
         body = "\n".join([f"• <code>{e(w)}</code>" for w in words]) if words else empty
         hint = "Press buttons below to add or remove keywords." if lang == "en" else "Нажимай кнопки ниже, чтобы добавлять или удалять слова." if lang == "ru" else "Натискай кнопки нижче, щоб додавати або видаляти слова."
 
-        tpl = await self.db.get_template(f"keywords_{lang}")
+        key = f"keywords_{lang}"
+        tpl = await self.db.get_template(key)
         if tpl:
             values = {
                 "keywords_list": body,
@@ -1711,12 +1737,12 @@ class BotHandlers:
                         await self.bot.delete_message(chat_id, message_id)
                     except Exception:
                         pass
-                await self.send_template_content(tg_id, rendered, ents, media, keywords_keyboard(lang, words))
+                await self.send_template_content(tg_id, rendered, ents, media, keywords_keyboard(lang, words), track_key=key)
             else:
-                await self._send_or_edit(tg_id, rendered, keywords_keyboard(lang, words), edit, entities=ents)
+                await self._send_or_edit(tg_id, rendered, keywords_keyboard(lang, words), edit, entities=ents, track_key=key)
             return
 
-        await self._send_or_edit(tg_id, f"{title}\n\n{body}\n\n{hint}", keywords_keyboard(lang, words), edit)
+        await self._send_or_edit(tg_id, f"{title}\n\n{body}\n\n{hint}", keywords_keyboard(lang, words), edit, track_key=key)
 
     async def show_keyword_delete_menu(self, tg_id: int, lang: str, edit: tuple[int, int] | None = None) -> None:
         words = await self.db.list_keywords(tg_id)
@@ -1743,7 +1769,8 @@ class BotHandlers:
                 item_lines.append(f"<b>{e(r.get('chat_title') or '')}</b> — {e(r.get('sender_name') or '')}\n{e(body)[:500]}\n<code>{dt(r.get('created_at'))}</code>")
             deleted_list = "\n\n".join(item_lines)
 
-        tpl = await self.db.get_template(f"deleted_{lang}")
+        key = f"deleted_{lang}"
+        tpl = await self.db.get_template(key)
         if tpl:
             values = {"deleted_messages_list": deleted_list, "deleted_count": str(len(rows))}
             rendered, ents = render_dynamic_template(str(tpl.get("text") or ""), tpl.get("entities") or [], values)
@@ -1755,16 +1782,16 @@ class BotHandlers:
                         await self.bot.delete_message(chat_id, message_id)
                     except Exception:
                         pass
-                await self.send_template_content(tg_id, rendered, ents, media, back_menu(lang))
+                await self.send_template_content(tg_id, rendered, ents, media, back_menu(lang), track_key=key)
             else:
-                await self._send_or_edit(tg_id, rendered, back_menu(lang), edit, entities=ents)
+                await self._send_or_edit(tg_id, rendered, back_menu(lang), edit, entities=ents, track_key=key)
             return
 
         if not rows:
-            await self._send_or_edit(tg_id, deleted_list, back_menu(lang), edit)
+            await self._send_or_edit(tg_id, deleted_list, back_menu(lang), edit, track_key=key)
             return
         title = "👻 <b>Last deleted</b>" if lang == "en" else "👻 <b>Останні видалені</b>" if lang == "uk" else "👻 <b>Последние удалённые</b>"
-        await self._send_or_edit(tg_id, f"{title}\n\n{deleted_list}", back_menu(lang), edit)
+        await self._send_or_edit(tg_id, f"{title}\n\n{deleted_list}", back_menu(lang), edit, track_key=key)
 
 
 
@@ -1786,7 +1813,8 @@ class BotHandlers:
             "available_total": str(stats.get("available") or "0.00"),
             "paid_total": str(stats.get("paid") or "0.00"),
         }
-        tpl = await self.db.get_template(f"referrals_{lang}")
+        key = f"referrals_{lang}"
+        tpl = await self.db.get_template(key)
         if tpl:
             rendered, ents = render_dynamic_template(str(tpl.get("text") or ""), tpl.get("entities") or [], values)
             media = tpl.get("media")
@@ -1798,9 +1826,9 @@ class BotHandlers:
                         await self.bot.delete_message(chat_id, message_id)
                     except Exception:
                         pass
-                await self.send_template_content(tg_id, rendered, ents, media, keyboard)
+                await self.send_template_content(tg_id, rendered, ents, media, keyboard, track_key=key)
             else:
-                await self._send_or_edit(tg_id, rendered, keyboard, edit, entities=ents)
+                await self._send_or_edit(tg_id, rendered, keyboard, edit, entities=ents, track_key=key)
             return
 
         if lang == "en":
@@ -1836,7 +1864,26 @@ class BotHandlers:
                 f"💵 Доступно: <b>${e(values['available_total'])}</b>\n"
                 f"✅ Виплачено: <b>${e(values['paid_total'])}</b>"
             )
-        await self._send_or_edit(tg_id, text, referral_keyboard(lang, self.bot_username(), tg_id), edit)
+        await self._send_or_edit(tg_id, text, referral_keyboard(lang, self.bot_username(), tg_id), edit, track_key=f"referrals_{lang}")
+
+    async def track_sent(self, result: Any, fallback_chat_id: int, track_key: str | None) -> None:
+        """Record (chat_id, message_id) -> template_key for deterministic /edit.
+
+        Telegram send methods return the created message, so we always know the
+        real message_id. This lets reply -> /edit resolve the exact template
+        without guessing from the message text.
+        """
+        if not track_key or not isinstance(result, dict):
+            return
+        try:
+            message_id = result.get("message_id")
+            if not message_id:
+                return
+            chat = result.get("chat") or {}
+            chat_id = chat.get("id") if isinstance(chat, dict) else None
+            await self.db.record_sent_template(chat_id or fallback_chat_id, int(message_id), track_key)
+        except Exception as exc:
+            print("track_sent failed:", repr(exc))
 
     async def _send_or_edit(
         self,
@@ -1845,15 +1892,19 @@ class BotHandlers:
         keyboard: dict[str, Any] | None = None,
         edit: tuple[int, int] | None = None,
         entities: list[dict[str, Any]] | None = None,
+        track_key: str | None = None,
     ) -> None:
         if edit:
             chat_id, message_id = edit
             try:
                 await self.bot.edit_message_text(chat_id, message_id, text, keyboard, entities=entities)
+                if track_key:
+                    await self.db.record_sent_template(chat_id, message_id, track_key)
                 return
             except Exception:
                 pass
-        await self.bot.send_message(tg_id, text, keyboard, entities=entities)
+        result = await self.bot.send_message(tg_id, text, keyboard, entities=entities)
+        await self.track_sent(result, tg_id, track_key)
 
     async def send_template_content(
         self,
@@ -1862,6 +1913,7 @@ class BotHandlers:
         entities: list[dict[str, Any]] | None,
         media: dict[str, Any] | None,
         keyboard: dict[str, Any] | None = None,
+        track_key: str | None = None,
     ) -> None:
         """Send a reusable content screen.
 
@@ -1877,31 +1929,38 @@ class BotHandlers:
             # templates with inline buttons and no caption at all.
             if not text:
                 try:
-                    await self.bot.send_cached_media(tg_id, kind, file_id, None, keyboard)
+                    result = await self.bot.send_cached_media(tg_id, kind, file_id, None, keyboard)
+                    await self.track_sent(result, tg_id, track_key)
                     return
                 except Exception as exc:
                     print("send media-only template failed:", repr(exc))
             # Telegram captions are limited. Keep a single card when possible.
             if text and len(text) <= 1024:
                 try:
-                    await self.bot.send_cached_media(tg_id, kind, file_id, text, keyboard, caption_entities=entities)
+                    result = await self.bot.send_cached_media(tg_id, kind, file_id, text, keyboard, caption_entities=entities)
+                    await self.track_sent(result, tg_id, track_key)
                     return
                 except Exception as exc:
                     print("send media template with caption failed:", repr(exc))
             # Fallback for long captions or unsupported formatting: send media
             # first and then the rich text with buttons separately.
             try:
-                await self.bot.send_cached_media(tg_id, kind, file_id)
+                media_result = await self.bot.send_cached_media(tg_id, kind, file_id)
+                # Track the media message too so reply -> /edit works on either part.
+                await self.track_sent(media_result, tg_id, track_key)
             except Exception as exc:
                 print("send media template failed:", repr(exc))
             if text:
-                await self.bot.send_message(tg_id, text, keyboard, entities=entities)
+                result = await self.bot.send_message(tg_id, text, keyboard, entities=entities)
+                await self.track_sent(result, tg_id, track_key)
             elif keyboard:
                 # Last-resort fallback. Normally media-only templates should be
                 # sent as one card above; this is only here if Telegram rejects it.
-                await self.bot.send_message(tg_id, "Відкрити нижче ⤵️", keyboard)
+                result = await self.bot.send_message(tg_id, "Відкрити нижче ⤵️", keyboard)
+                await self.track_sent(result, tg_id, track_key)
             return
-        await self.bot.send_message(tg_id, text or "—", keyboard, entities=entities)
+        result = await self.bot.send_message(tg_id, text or "—", keyboard, entities=entities)
+        await self.track_sent(result, tg_id, track_key)
 
     async def send_template_screen(
         self,
@@ -1909,6 +1968,7 @@ class BotHandlers:
         tpl: dict[str, Any],
         keyboard: dict[str, Any] | None = None,
         edit: tuple[int, int] | None = None,
+        track_key: str | None = None,
     ) -> None:
         media = tpl.get("media")
         text = str(tpl.get("text") or "")
@@ -1920,9 +1980,9 @@ class BotHandlers:
                     await self.bot.delete_message(chat_id, message_id)
                 except Exception:
                     pass
-            await self.send_template_content(tg_id, text, entities, media, keyboard)
+            await self.send_template_content(tg_id, text, entities, media, keyboard, track_key=track_key)
             return
-        await self._send_or_edit(tg_id, text, keyboard, edit, entities=entities)
+        await self._send_or_edit(tg_id, text, keyboard, edit, entities=entities, track_key=track_key)
 
     async def handle_callback(self, cb: dict[str, Any]) -> None:
         cb_id = cb.get("id")
@@ -1967,11 +2027,12 @@ class BotHandlers:
         elif data == "connect":
             await self.show_connect(tg_id, lang, edit)
         elif data == "privacy":
-            tpl = await self.db.get_template(f"privacy_{lang}")
+            key = f"privacy_{lang}"
+            tpl = await self.db.get_template(key)
             if tpl:
-                await self.send_template_screen(tg_id, tpl, back_menu(lang), edit)
+                await self.send_template_screen(tg_id, tpl, back_menu(lang), edit, track_key=key)
             else:
-                await self._send_or_edit(tg_id, tr(lang, "privacy"), back_menu(lang), edit)
+                await self._send_or_edit(tg_id, tr(lang, "privacy"), back_menu(lang), edit, track_key=key)
         elif data == "lang":
             await self.show_language_screen(tg_id, lang, edit)
         elif data == "last_deleted":
@@ -1991,11 +2052,12 @@ class BotHandlers:
             await self.show_keywords(tg_id, lang, edit)
         elif data == "kw_add":
             await self.db.set_state(tg_id, "keyword_add", {})
-            tpl = await self.db.get_template(f"prompt_keyword_add_{lang}")
+            key = f"prompt_keyword_add_{lang}"
+            tpl = await self.db.get_template(key)
             if tpl:
-                await self.send_template_screen(tg_id, tpl, cancel_keyboard(lang, "keywords"), edit)
+                await self.send_template_screen(tg_id, tpl, cancel_keyboard(lang, "keywords"), edit, track_key=key)
             else:
-                await self._send_or_edit(tg_id, state_prompt(lang, "keyword_add", {}), cancel_keyboard(lang, "keywords"), edit)
+                await self._send_or_edit(tg_id, state_prompt(lang, "keyword_add", {}), cancel_keyboard(lang, "keywords"), edit, track_key=key)
         elif data == "kw_delete_menu":
             await self.show_keyword_delete_menu(tg_id, lang, edit)
         elif data.startswith("kw_del:"):
@@ -2039,7 +2101,8 @@ class BotHandlers:
             "amount_usd": str(plan["price_usd"]),
             "amount_uah_line": amount_uah_line(amount_uah, lang),
         }
-        tpl = await self.db.get_template(f"choose_payment_{lang}")
+        key = f"choose_payment_{lang}"
+        tpl = await self.db.get_template(key)
         if tpl:
             rendered, ents = render_dynamic_template(str(tpl.get("text") or ""), tpl.get("entities") or [], values)
             media = tpl.get("media")
@@ -2050,14 +2113,14 @@ class BotHandlers:
                         await self.bot.delete_message(chat_id, message_id)
                     except Exception:
                         pass
-                await self.send_template_content(tg_id, rendered, ents, media, payment_methods_keyboard(lang, plan_id, methods))
+                await self.send_template_content(tg_id, rendered, ents, media, payment_methods_keyboard(lang, plan_id, methods), track_key=key)
             else:
-                await self._send_or_edit(tg_id, rendered, payment_methods_keyboard(lang, plan_id, methods), edit, entities=ents)
+                await self._send_or_edit(tg_id, rendered, payment_methods_keyboard(lang, plan_id, methods), edit, entities=ents, track_key=key)
             return
         text = tr(lang, "choose_payment", plan=e(values["plan_name"]), price=e(values["amount_usd"]))
         if amount_uah is not None:
             text += "\n" + amount_uah_line(amount_uah, lang)
-        await self._send_or_edit(tg_id, text, payment_methods_keyboard(lang, plan_id, methods), edit)
+        await self._send_or_edit(tg_id, text, payment_methods_keyboard(lang, plan_id, methods), edit, track_key=key)
 
     async def callback_pay(self, tg_id: int, lang: str, plan_id: int, method_code: str, edit: tuple[int, int] | None) -> None:
         plan = await self.db.get_plan(plan_id)
@@ -2118,7 +2181,9 @@ class BotHandlers:
             "payment_amount_lines": payment_amount_lines(amount, amount_uah, method_code, lang),
             "instructions": method_instructions(method, lang),
         }
-        tpl = await self.db.get_template(f"payment_manual_{method_code}_{lang}") or await self.db.get_template(f"payment_manual_{lang}")
+        # Per-method key so editing the TON screen does not change card/TRC20/BEP20.
+        key = f"payment_manual_{method_code}_{lang}"
+        tpl = await self.db.get_template(key) or await self.db.get_template(f"payment_manual_{lang}")
         if tpl:
             rendered, ents = render_dynamic_template(str(tpl.get("text") or ""), tpl.get("entities") or [], values)
             media = tpl.get("media")
@@ -2129,16 +2194,16 @@ class BotHandlers:
                         await self.bot.delete_message(chat_id, message_id)
                     except Exception:
                         pass
-                await self.send_template_content(tg_id, rendered, ents, media, manual_payment_keyboard(lang, int(payment["id"])))
+                await self.send_template_content(tg_id, rendered, ents, media, manual_payment_keyboard(lang, int(payment["id"])), track_key=key)
             else:
-                await self._send_or_edit(tg_id, rendered, manual_payment_keyboard(lang, int(payment["id"])), edit, entities=ents)
+                await self._send_or_edit(tg_id, rendered, manual_payment_keyboard(lang, int(payment["id"])), edit, entities=ents, track_key=key)
             return
         text = tr(lang, "payment_manual", plan=e(values["plan_name"]), amount=e(amount), instructions=method_instructions(method, lang))
         if method_code == "ua_card" and amount_uah is not None:
             text = text.replace(f"💰 <b>Сума:</b> ${e(amount)}", f"💰 <b>Сума:</b> ${e(amount)}\n{amount_uah_line(amount_uah, lang)}")
             text = text.replace(f"💰 <b>Сумма:</b> ${e(amount)}", f"💰 <b>Сумма:</b> ${e(amount)}\n{amount_uah_line(amount_uah, lang)}")
             text = text.replace(f"💰 <b>Amount:</b> ${e(amount)}", f"💰 <b>Amount:</b> ${e(amount)}\n{amount_uah_line(amount_uah, lang)}")
-        await self._send_or_edit(tg_id, text, manual_payment_keyboard(lang, int(payment["id"])), edit)
+        await self._send_or_edit(tg_id, text, manual_payment_keyboard(lang, int(payment["id"])), edit, track_key=key)
 
     async def callback_check_crypto(self, tg_id: int, lang: str, payment_id: int, edit: tuple[int, int] | None) -> None:
         payment = await self.db.get_payment(payment_id)
@@ -2236,11 +2301,13 @@ class BotHandlers:
             await self.bot.send_message(tg_id, tr(lang, "payment_error"))
             return
         await self.db.set_state(tg_id, "manual_payment_proof", {"payment_id": payment_id})
-        tpl = await self.db.get_template(f"prompt_manual_payment_proof_{lang}")
+        key = f"prompt_manual_payment_proof_{lang}"
+        tpl = await self.db.get_template(key)
         if tpl:
-            await self.send_template_screen(tg_id, tpl, cancel_keyboard(lang, "plans"))
+            await self.send_template_screen(tg_id, tpl, cancel_keyboard(lang, "plans"), track_key=key)
         else:
-            await self.bot.send_message(tg_id, state_prompt(lang, "manual_payment_proof", {"payment_id": payment_id}), cancel_keyboard(lang, "plans"))
+            result = await self.bot.send_message(tg_id, state_prompt(lang, "manual_payment_proof", {"payment_id": payment_id}), cancel_keyboard(lang, "plans"))
+            await self.track_sent(result, tg_id, key)
 
     async def notify_admin_payment(self, payment_id: int) -> None:
         payment = await self.db.get_payment(payment_id)
@@ -2616,11 +2683,13 @@ class BotHandlers:
         lang = await self.user_lang(owner_id)
         try:
             if conn.get("is_enabled"):
-                tpl = await self.db.get_template(f"business_connected_{lang}")
+                key = f"business_connected_{lang}"
+                tpl = await self.db.get_template(key)
                 if tpl:
-                    await self.send_template_screen(owner_id, tpl, main_menu(lang, await self.db.is_admin(owner_id)))
+                    await self.send_template_screen(owner_id, tpl, main_menu(lang, await self.db.is_admin(owner_id)), track_key=key)
                 else:
-                    await self.bot.send_message(owner_id, tr(lang, "business_connected"), main_menu(lang, await self.db.is_admin(owner_id)))
+                    result = await self.bot.send_message(owner_id, tr(lang, "business_connected"), main_menu(lang, await self.db.is_admin(owner_id)))
+                    await self.track_sent(result, owner_id, key)
             else:
                 await self.bot.send_message(owner_id, tr(lang, "business_disabled"), main_menu(lang, await self.db.is_admin(owner_id)))
         except Exception as exc:

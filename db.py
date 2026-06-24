@@ -191,6 +191,17 @@ class Database:
             created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
         );
 
+        -- Deterministic /edit: remember which reusable template every bot
+        -- screen was sent as, so reply -> /edit can resolve the exact template
+        -- by (chat_id, message_id) instead of guessing from the message text.
+        CREATE TABLE IF NOT EXISTS sent_template_messages (
+            chat_id BIGINT NOT NULL,
+            message_id BIGINT NOT NULL,
+            template_key TEXT NOT NULL,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            PRIMARY KEY(chat_id, message_id)
+        );
+
         ALTER TABLE plans ADD COLUMN IF NOT EXISTS price_uah NUMERIC(12,0);
         ALTER TABLE plans ADD COLUMN IF NOT EXISTS price_stars INT;
         ALTER TABLE users ADD COLUMN IF NOT EXISTS referrer_id BIGINT REFERENCES users(tg_id) ON DELETE SET NULL;
@@ -219,6 +230,7 @@ class Database:
         CREATE INDEX IF NOT EXISTS idx_cached_lookup ON cached_messages(business_connection_id, chat_id, message_id);
         CREATE INDEX IF NOT EXISTS idx_deleted_owner ON deleted_events(owner_tg_id, created_at DESC);
         CREATE INDEX IF NOT EXISTS idx_payments_user ON payments(user_id, created_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_sent_template_created ON sent_template_messages(created_at);
         """
         async with self._pool().acquire() as con:
             await con.execute(sql)
@@ -1827,6 +1839,51 @@ UQDbfUbzkI8lfO6G1KAPB_F2Et2IRTM4EvFhX5ATaXYrjoV3""",
     async def delete_template(self, key: str) -> None:
         async with self._pool().acquire() as con:
             await con.execute("DELETE FROM settings WHERE key=$1", f"template_{key}")
+
+    async def record_sent_template(self, chat_id: int, message_id: int, template_key: str) -> None:
+        """Remember that a specific bot message is a known reusable template.
+
+        This makes `/edit` deterministic: when an admin replies to a bot screen,
+        we resolve the exact template by (chat_id, message_id) instead of guessing
+        from the (possibly heavily customized) message text.
+        """
+        if not message_id or not template_key:
+            return
+        try:
+            async with self._pool().acquire() as con:
+                await con.execute(
+                    """
+                    INSERT INTO sent_template_messages(chat_id, message_id, template_key)
+                    VALUES($1, $2, $3)
+                    ON CONFLICT(chat_id, message_id)
+                    DO UPDATE SET template_key=EXCLUDED.template_key, created_at=NOW()
+                    """,
+                    int(chat_id),
+                    int(message_id),
+                    str(template_key),
+                )
+                # Lazy bounded cleanup so this table never grows without limit.
+                if int(message_id) % 50 == 0:
+                    await con.execute(
+                        "DELETE FROM sent_template_messages WHERE created_at < NOW() - INTERVAL '60 days'"
+                    )
+        except Exception as exc:
+            print("record_sent_template failed:", repr(exc))
+
+    async def get_sent_template_key(self, chat_id: int, message_id: int) -> str | None:
+        if not message_id:
+            return None
+        try:
+            async with self._pool().acquire() as con:
+                row = await con.fetchrow(
+                    "SELECT template_key FROM sent_template_messages WHERE chat_id=$1 AND message_id=$2",
+                    int(chat_id),
+                    int(message_id),
+                )
+                return str(row["template_key"]) if row else None
+        except Exception as exc:
+            print("get_sent_template_key failed:", repr(exc))
+            return None
 
     async def set_state(self, user_id: int, state: str, payload: dict[str, Any] | None = None) -> None:
         async with self._pool().acquire() as con:

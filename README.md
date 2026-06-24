@@ -305,3 +305,44 @@ This build keeps timer-only behavior but adds safe media-only logs by default:
 - It does not log message text/captions.
 - `NOTIFY_MISSED_TIMER_MEDIA=false` by default, so users do not see annoying failure warnings when Telegram sends only a deletion event without a file.
 - If a timer photo/video is not delivered, check Railway for `GHOSTLY_MEDIA_DEBUG`, `Media cached bytes`, `Timer media instant not triggered`, and `Timer media instant delivery result`.
+
+
+## Deterministic `/edit` (precise template editing)
+
+Earlier builds guessed which screen a message belonged to by scanning its text for
+keywords. After a screen was customized with Premium emoji, or when two screens
+shared words, this could pick the wrong template — so `/edit` sometimes showed the
+wrong "current text to copy" and saved your new content into a different screen.
+
+This build makes `/edit` deterministic:
+
+- Every screen the bot sends is recorded as `(chat_id, message_id) → template_key`
+  in the new `sent_template_messages` table.
+- When you reply to a bot message with `/edit`, the bot resolves the **exact**
+  template by message id, with no guessing. The text you edit is the text that
+  changes — and it stays changed for future users in that exact screen and language.
+- Heuristic detection is kept only as a fallback for old messages sent before this
+  build (just reopen the screen once to re-record it).
+- Per-method payment screens stay isolated: editing the TON screen never touches
+  card / USDT TRC20 / USDT BEP20.
+
+The mapping table self-prunes (entries older than 60 days are removed lazily), so it
+never grows unbounded.
+
+### Full content support
+
+`/edit` accepts any of the following as replacement content, in any language, with
+full formatting and Premium custom emoji preserved through Telegram entities:
+
+- rich text (bold, italic, underline, strikethrough, spoiler, code, blockquote, links);
+- photo + caption;
+- video + caption;
+- GIF / animation + caption;
+- document / file + caption;
+- audio + caption;
+- voice + caption;
+- video note (round video, no caption);
+- **stickers** (sent as a media-only screen, inline buttons preserved).
+
+Workflow: open the screen → reply to it with `/edit` → send the new content as one
+message. Switch the bot language and repeat to edit the same screen in UA / RU / EN.
