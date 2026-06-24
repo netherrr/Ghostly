@@ -95,10 +95,13 @@ def admin_payment_keyboard(payment_id: int) -> dict[str, Any]:
     return inline([[ ("✅ Approve", f"admin_approve:{payment_id}"), ("❌ Reject", f"admin_reject:{payment_id}") ]])
 
 
-def keywords_keyboard(lang: str, words: list[str]) -> dict[str, Any]:
+def keywords_keyboard(lang: str, words: list[str], monitored: list[dict[str, Any]] | None = None) -> dict[str, Any]:
     rows: list[list[tuple[str, str]]] = [[(btn(lang, "add_keyword"), "kw_add")]]
     if words:
         rows.append([(btn(lang, "delete_keyword"), "kw_delete_menu")])
+    for c in (monitored or [])[:10]:
+        title = (c.get("title") or str(c.get("chat_id")))[:30]
+        rows.append([(f"🛑 {title}", f"kwchat_del:{c['chat_id']}")])
     rows.append([(btn(lang, "back"), "menu")])
     return inline(rows)
 

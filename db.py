@@ -271,6 +271,21 @@ class Database:
             updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
         );
         CREATE INDEX IF NOT EXISTS idx_broadcast_active ON broadcast_chats(is_active);
+
+        -- Group keyword monitoring: a user links a group/channel (where the bot
+        -- can read messages) so their keywords are matched against it.
+        CREATE TABLE IF NOT EXISTS monitored_chats (
+            id BIGSERIAL PRIMARY KEY,
+            chat_id BIGINT NOT NULL,
+            owner_tg_id BIGINT REFERENCES users(tg_id) ON DELETE CASCADE,
+            title TEXT,
+            is_active BOOLEAN NOT NULL DEFAULT TRUE,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            UNIQUE(chat_id, owner_tg_id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_monitored_chat ON monitored_chats(chat_id) WHERE is_active;
+        CREATE INDEX IF NOT EXISTS idx_monitored_owner ON monitored_chats(owner_tg_id);
         """
         async with self._pool().acquire() as con:
             await con.execute(sql)
@@ -1627,12 +1642,61 @@ UQDbfUbzkI8lfO6G1KAPB_F2Et2IRTM4EvFhX5ATaXYrjoV3""",
         words = await self.list_keywords(tg_id)
         return [w for w in words if w and w in haystack]
 
+    # ----- Group keyword monitoring -----
+
+    async def add_monitored_chat(self, chat_id: int, owner_tg_id: int, title: str | None = None) -> dict[str, Any]:
+        async with self._pool().acquire() as con:
+            row = await con.fetchrow(
+                """
+                INSERT INTO monitored_chats(chat_id, owner_tg_id, title)
+                VALUES($1, $2, $3)
+                ON CONFLICT(chat_id, owner_tg_id) DO UPDATE SET
+                    is_active=TRUE,
+                    title=COALESCE(EXCLUDED.title, monitored_chats.title),
+                    updated_at=NOW()
+                RETURNING *
+                """,
+                int(chat_id),
+                int(owner_tg_id),
+                title,
+            )
+            return dict(row)
+
+    async def remove_monitored_chat(self, chat_id: int, owner_tg_id: int) -> bool:
+        async with self._pool().acquire() as con:
+            result = await con.execute(
+                "DELETE FROM monitored_chats WHERE chat_id=$1 AND owner_tg_id=$2",
+                int(chat_id),
+                int(owner_tg_id),
+            )
+            try:
+                return int(result.split()[-1]) > 0
+            except Exception:
+                return False
+
+    async def list_monitored_chats(self, owner_tg_id: int) -> list[dict[str, Any]]:
+        async with self._pool().acquire() as con:
+            rows = await con.fetch(
+                "SELECT * FROM monitored_chats WHERE owner_tg_id=$1 ORDER BY created_at",
+                int(owner_tg_id),
+            )
+            return [dict(r) for r in rows]
+
+    async def monitor_owners_for_chat(self, chat_id: int) -> list[dict[str, Any]]:
+        async with self._pool().acquire() as con:
+            rows = await con.fetch(
+                "SELECT owner_tg_id, title FROM monitored_chats WHERE chat_id=$1 AND is_active=TRUE",
+                int(chat_id),
+            )
+            return [dict(r) for r in rows]
+
     async def forget_user(self, tg_id: int) -> None:
         async with self._pool().acquire() as con:
             async with con.transaction():
                 await con.execute("DELETE FROM deleted_events WHERE owner_tg_id=$1", tg_id)
                 await con.execute("DELETE FROM cached_messages WHERE owner_tg_id=$1", tg_id)
                 await con.execute("DELETE FROM business_connections WHERE owner_tg_id=$1", tg_id)
+                await con.execute("DELETE FROM monitored_chats WHERE owner_tg_id=$1", tg_id)
                 await con.execute("DELETE FROM payments WHERE user_id=$1", tg_id)
                 await con.execute("UPDATE users SET subscription_until=NULL, free_deleted_today=0 WHERE tg_id=$1", tg_id)
 

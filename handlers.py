@@ -1104,10 +1104,10 @@ class BotHandlers:
 
     async def handle_message(self, msg: dict[str, Any]) -> None:
         chat = msg.get("chat") or {}
-        # The bot's private UI only makes sense in 1:1 chats. Group/supergroup/
-        # channel messages are ignored here so the bot never spams menus in chats
-        # it was added to (broadcast targets are managed separately).
+        # The bot's private UI only makes sense in 1:1 chats. Group/supergroup
+        # messages go to the keyword-monitoring path instead of the menu UI.
         if chat.get("type") and chat.get("type") != "private":
+            await self.handle_group_message(msg)
             return
         user_obj = msg.get("from") or {}
         user = await self.db.upsert_user(user_obj)
@@ -1827,10 +1827,25 @@ class BotHandlers:
 
     async def show_keywords(self, tg_id: int, lang: str, edit: tuple[int, int] | None = None) -> None:
         words = await self.db.list_keywords(tg_id)
+        monitored = await self.db.list_monitored_chats(tg_id)
         title = "🔎 <b>Keyword alerts</b>" if lang == "en" else "🔎 <b>Оповещения по ключевым словам</b>" if lang == "ru" else "🔎 <b>Сповіщення за ключовими словами</b>"
         empty = "No keywords yet." if lang == "en" else "Ключевых слов пока нет." if lang == "ru" else "Ключових слів поки немає."
         body = "\n".join([f"• <code>{e(w)}</code>" for w in words]) if words else empty
-        hint = "Press buttons below to add or remove keywords." if lang == "en" else "Нажимай кнопки ниже, чтобы добавлять или удалять слова." if lang == "ru" else "Натискай кнопки нижче, щоб додавати або видаляти слова."
+
+        # Group monitoring summary + how-to.
+        groups_title = "📡 Monitored groups:" if lang == "en" else "📡 Группы на мониторинге:" if lang == "ru" else "📡 Групи на моніторингу:"
+        if monitored:
+            groups_body = "\n".join([f"• {e(c.get('title') or c.get('chat_id'))}" for c in monitored])
+        else:
+            groups_body = ("— none yet" if lang == "en" else "— пока нет" if lang == "ru" else "— поки немає")
+        how_to = (
+            "Add me to a group (as admin) and send <code>/watch</code> there. I'll DM you when your keywords appear. <code>/unwatch</code> to stop."
+            if lang == "en" else
+            "Добавь меня в группу (админом) и отправь там <code>/watch</code>. Я напишу в личку, когда встретятся твои слова. <code>/unwatch</code> — выключить."
+            if lang == "ru" else
+            "Додай мене в групу (адміном) і надішли там <code>/watch</code>. Я напишу в особисті, коли зʼявляться твої слова. <code>/unwatch</code> — вимкнути."
+        )
+        hint = f"{groups_title}\n{groups_body}\n\n{how_to}"
 
         key = f"keywords_{lang}"
         tpl = await self.db.get_template(key)
@@ -1849,12 +1864,12 @@ class BotHandlers:
                         await self.bot.delete_message(chat_id, message_id)
                     except Exception:
                         pass
-                await self.send_template_content(tg_id, rendered, ents, media, keywords_keyboard(lang, words), track_key=key)
+                await self.send_template_content(tg_id, rendered, ents, media, keywords_keyboard(lang, words, monitored), track_key=key)
             else:
-                await self._send_or_edit(tg_id, rendered, keywords_keyboard(lang, words), edit, entities=ents, track_key=key)
+                await self._send_or_edit(tg_id, rendered, keywords_keyboard(lang, words, monitored), edit, entities=ents, track_key=key)
             return
 
-        await self._send_or_edit(tg_id, f"{title}\n\n{body}\n\n{hint}", keywords_keyboard(lang, words), edit, track_key=key)
+        await self._send_or_edit(tg_id, f"{title}\n\n{body}\n\n{hint}", keywords_keyboard(lang, words, monitored), edit, track_key=key)
 
     async def show_keyword_delete_menu(self, tg_id: int, lang: str, edit: tuple[int, int] | None = None) -> None:
         words = await self.db.list_keywords(tg_id)
@@ -2185,6 +2200,9 @@ class BotHandlers:
             idx = int(data.split(":", 1)[1])
             if 0 <= idx < len(words):
                 await self.db.delete_keyword(tg_id, words[idx])
+            await self.show_keywords(tg_id, lang, edit)
+        elif data.startswith("kwchat_del:"):
+            await self.db.remove_monitored_chat(int(data.split(":", 1)[1]), tg_id)
             await self.show_keywords(tg_id, lang, edit)
         elif data.startswith("setlang:"):
             new_lang = data.split(":", 1)[1]
@@ -3005,6 +3023,113 @@ class BotHandlers:
             existing = await self.db.get_broadcast_chat(int(chat_id))
             if existing:
                 await self.db.set_broadcast_active(int(chat_id), False)
+
+    # ===================== Group keyword monitoring =====================
+
+    async def handle_group_message(self, msg: dict[str, Any]) -> None:
+        chat = msg.get("chat") or {}
+        chat_id = chat.get("id")
+        if not chat_id:
+            return
+        from_user = msg.get("from") or {}
+        text = (msg.get("text") or "").strip()
+        # /watch and /unwatch are delivered even with privacy mode on, so users
+        # can register a chat without making the bot read everything first.
+        cmd0 = text.split()[0].split("@")[0] if text else ""
+        if cmd0 in {"/watch", "/unwatch"}:
+            await self.handle_group_watch_command(msg, chat, from_user, cmd0)
+            return
+        # Keyword matching for every user monitoring this chat.
+        body = msg.get("text") or msg.get("caption") or ""
+        if not body:
+            return
+        owners = await self.db.monitor_owners_for_chat(int(chat_id))
+        if not owners:
+            return
+        sender_id = int(from_user["id"]) if from_user.get("id") else None
+        sender_name = display_name(from_user) or (msg.get("sender_chat") or {}).get("title") or "—"
+        chat_title = chat.get("title") or str(chat_id)
+        for o in owners:
+            owner_id = int(o["owner_tg_id"])
+            if sender_id and owner_id == sender_id:
+                continue  # never alert a user about their own message
+            if not await self.db.active_subscription(owner_id):
+                continue
+            try:
+                matches = await self.db.match_keywords(owner_id, body)
+            except Exception:
+                matches = []
+            if not matches:
+                continue
+            lang = await self.user_lang(owner_id)
+            title = (
+                "🔎 <b>Keyword in group</b>" if lang == "en"
+                else "🔎 <b>Ключевое слово в группе</b>" if lang == "ru"
+                else "🔎 <b>Ключове слово в групі</b>"
+            )
+            await self.safe_send(
+                owner_id,
+                f"{title}: {', '.join(e(m) for m in matches)}\n\n"
+                f"<b>{tr(lang, 'chat')}:</b> {e(chat_title)}\n"
+                f"<b>{tr(lang, 'from')}:</b> {e(sender_name)}\n\n{e(body)[:2500]}",
+            )
+
+    async def handle_group_watch_command(self, msg: dict[str, Any], chat: dict[str, Any], from_user: dict[str, Any], cmd: str) -> None:
+        chat_id = int(chat["id"])
+        chat_title = chat.get("title") or str(chat_id)
+        if not from_user or not from_user.get("id"):
+            return
+        await self.db.upsert_user(from_user)
+        uid = int(from_user["id"])
+        lang = await self.user_lang(uid)
+
+        if cmd == "/unwatch":
+            removed = await self.db.remove_monitored_chat(chat_id, uid)
+            reply = (
+                ("🛑 Monitoring of this chat is off." if removed else "This chat was not monitored.") if lang == "en"
+                else ("🛑 Мониторинг этого чата выключен." if removed else "Этот чат не отслеживался.") if lang == "ru"
+                else ("🛑 Моніторинг цього чату вимкнено." if removed else "Цей чат не був у моніторингу.")
+            )
+            await self._reply_in_group(chat_id, reply)
+            return
+
+        # /watch — gated by subscription/trial like the rest of the features.
+        if not await self.db.active_subscription(uid):
+            locked = (
+                "🔒 Active subscription required. Open the bot in DM: /start" if lang == "en"
+                else "🔒 Нужна активная подписка. Открой бота в личке: /start" if lang == "ru"
+                else "🔒 Потрібна активна підписка. Відкрий бота в особистих: /start"
+            )
+            await self._reply_in_group(chat_id, locked)
+            return
+        kws = await self.db.list_keywords(uid)
+        await self.db.add_monitored_chat(chat_id, uid, chat_title)
+        no_kw = (
+            "\n⚠️ You have no keywords yet — add them in the bot: 🔎 Keywords." if lang == "en"
+            else "\n⚠️ У тебя ещё нет ключевых слов — добавь их в боте: 🔎 Ключевые слова." if lang == "ru"
+            else "\n⚠️ У тебе ще немає ключових слів — додай їх у боті: 🔎 Ключові слова."
+        ) if not kws else ""
+        group_ok = (
+            "✅ Watching this chat for your keywords. Alerts go to our DM.\nℹ️ Make me admin (or disable Privacy Mode) so I can read all messages." if lang == "en"
+            else "✅ Слежу за этим чатом по твоим ключевым словам. Уведомления придут в наш личный чат.\nℹ️ Сделай меня админом (или выключи Privacy Mode), чтобы я видел все сообщения." if lang == "ru"
+            else "✅ Стежу за цим чатом за твоїми ключовими словами. Сповіщення прийдуть у наш особистий чат.\nℹ️ Зроби мене адміном (або вимкни Privacy Mode), щоб я бачив усі повідомлення."
+        )
+        await self._reply_in_group(chat_id, group_ok + no_kw)
+        dm = (
+            f"✅ Monitoring of group <b>{e(chat_title)}</b> is on. Keyword alerts will arrive here." if lang == "en"
+            else f"✅ Мониторинг группы <b>{e(chat_title)}</b> включён. Уведомления о ключевых словах будут приходить сюда." if lang == "ru"
+            else f"✅ Моніторинг групи <b>{e(chat_title)}</b> увімкнено. Сповіщення про ключові слова приходитимуть сюди."
+        )
+        try:
+            await self.bot.send_message(uid, dm)
+        except Exception:
+            pass
+
+    async def _reply_in_group(self, chat_id: int, text: str) -> None:
+        try:
+            await self.bot.send_message(chat_id, text)
+        except Exception as exc:
+            print("group reply failed:", repr(exc), flush=True)
 
     async def handle_business_connection(self, data: dict[str, Any]) -> None:
         conn = await self.db.upsert_business_connection(data)
