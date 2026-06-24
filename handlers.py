@@ -3059,10 +3059,25 @@ class BotHandlers:
 
 
     def _extract_reply_media(self, reply_to: dict[str, Any]) -> tuple[str, str]:
-        """Return (kind, file_id) for captionless media inside a reply_to_message."""
-        # Only capture media without caption (view-once / timer media never has a caption)
+        """Return (kind, file_id) for VIEW-ONCE/TIMER media inside a reply_to_message.
+
+        Only extracts when the replied-to message is confirmed to be view-once or
+        timer media. Regular captionless photos/videos are intentionally skipped
+        to prevent false-positive captures when the owner or a contact replies to
+        normal media.
+        """
         if reply_to.get("caption"):
             return "", ""
+
+        # Require a hard signal that this is actually view-once or self-destruct media.
+        # has_protected_content=True is what Telegram sets on 1-view (view-once) messages.
+        # raw_update_has_timer_hint catches explicit TTL/self-destruct fields.
+        # Without at least one of these signals we leave regular media alone.
+        is_protected = bool(reply_to.get("has_protected_content"))
+        has_timer   = self.raw_update_has_timer_hint(reply_to)
+        if not is_protected and not has_timer:
+            return "", ""
+
         if reply_to.get("photo"):
             best = max(reply_to["photo"], key=lambda p: p.get("file_size") or 0)
             return "photo", best.get("file_id") or ""
@@ -3104,9 +3119,11 @@ class BotHandlers:
         if sender_id != owner_id:
             return
 
-        # The media must be FROM a contact (not the owner's own outgoing message)
+        # The media must be FROM a contact (not the owner's own outgoing message).
+        # If replied_from_id is 0 (field missing), we cannot confirm it's a contact
+        # — skip to avoid accidentally re-sending the owner's own media.
         replied_from_id = int((reply_to.get("from") or {}).get("id") or 0)
-        if replied_from_id == owner_id:
+        if not replied_from_id or replied_from_id == owner_id:
             return
 
         chat = msg.get("chat") or {}
