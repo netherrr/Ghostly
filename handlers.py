@@ -2753,34 +2753,26 @@ class BotHandlers:
         if explicit_hint:
             return True
 
-        # Core spy-bot capture: contact-sent captionless photo/video/video_note in a
-        # private chat is captured immediately on arrival. This is the ONLY reliable
-        # window — Bot API has no "opened" event, server-side screenshots are impossible,
-        # and the file becomes inaccessible once the recipient opens a view-once message.
-        # We skip this for messages sent BY the owner (their own outgoing media) to avoid
-        # false-positive notifications.
+        # IMPORTANT — DO NOT proactively forward ordinary media.
+        # Beyond the confirmed disappearing signals handled above (has_protected_content
+        # for 1-view media + explicit TTL/self-destruct hints), we must NOT auto-send
+        # media just because it arrived without a caption. Capturing every captionless
+        # photo/video/circle from a contact floods the owner with normal, non-disappearing
+        # media — exactly the false positive being reported.
+        #
+        # Genuine disappearing media that Telegram does not flag is instead captured via
+        # the reply mechanism (handle_reply_reveals_timer_media): the owner replies to the
+        # message BEFORE opening it and the bot extracts the file then. That path is the
+        # reliable way to view disappearing media and is fully preserved.
+        #
+        # The block below remains only as an OPT-IN power-user fallback. It is OFF by
+        # default for every media type and never fires for the owner's own outgoing media.
         sender_id = int((msg.get("from") or {}).get("id") or 0)
         owner_id_val = int(cached.get("owner_tg_id") or 0)
-        chat_type = (msg.get("chat") or {}).get("type", "private")
-        if sender_id and owner_id_val and sender_id != owner_id_val and chat_type == "private":
-            return True
-
-        # The fallback below must never fire for the owner's own outgoing messages.
-        # sender_id/owner_id_val are already resolved above; if either is missing or
-        # they match, bail out immediately — no fallback for the owner's own media.
         if not sender_id or not owner_id_val or sender_id == owner_id_val:
             return False
 
-        # Fallback for Telegram versions that hide the timer flag.
-        # video_note (circles) are almost always disappearing — treat captionless as hint.
-        # For photo/video, captionless heuristic is OFF by default to avoid false positives
-        # (many normal photos/videos are sent without captions in business chats).
-        # Enable with TIMER_MEDIA_CAPTIONLESS_INSTANT=true to apply to all types.
-        if kind == "video_note":
-            fallback_default = "true"
-        else:
-            fallback_default = "false"
-        fallback_enabled = os.getenv("TIMER_MEDIA_CAPTIONLESS_INSTANT", fallback_default).lower() in {"1", "true", "yes", "on"}
+        fallback_enabled = os.getenv("TIMER_MEDIA_CAPTIONLESS_INSTANT", "false").lower() in {"1", "true", "yes", "on"}
         if not fallback_enabled:
             return False
 
