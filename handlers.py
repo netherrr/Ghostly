@@ -1536,10 +1536,20 @@ class BotHandlers:
 
     async def send_connect_card(self, tg_id: int, lang: str, edit: tuple[int, int] | None = None) -> bool:
         try:
-            asset_path = Path(__file__).with_name("assets") / f"connect_{lang}.jpg"
-            if not asset_path.exists():
-                asset_path = Path(__file__).with_name("assets") / "connect_uk.jpg"
-            if not asset_path.exists():
+            assets = Path(__file__).with_name("assets")
+            asset_path: Path | None = None
+            for ext in ("png", "jpg", "jpeg"):
+                p = assets / f"connect_{lang}.{ext}"
+                if p.exists():
+                    asset_path = p
+                    break
+            if asset_path is None:
+                for ext in ("png", "jpg", "jpeg"):
+                    p = assets / f"connect_uk.{ext}"
+                    if p.exists():
+                        asset_path = p
+                        break
+            if asset_path is None:
                 return False
             if edit:
                 chat_id, message_id = edit
