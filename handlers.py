@@ -30,8 +30,11 @@ from keyboards import (
     admin_settings_keyboard,
     admin_single_payment_keyboard,
     back_menu,
+    broadcast_chat_keyboard,
+    broadcast_menu_keyboard,
     cancel_keyboard,
     crypto_payment_keyboard,
+    inline,
     keyword_delete_keyboard,
     keywords_keyboard,
     lang_keyboard,
@@ -130,6 +133,12 @@ def plan_duration_label(days: int | str | None, lang: str) -> str:
         d = 0
     if d >= 30000:
         return "назавжди" if lang == "uk" else "навсегда" if lang == "ru" else "lifetime"
+    if d == 1:
+        return "1 день" if lang == "uk" else "1 день" if lang == "ru" else "1 day"
+    if d == 3:
+        return "3 дні" if lang == "uk" else "3 дня" if lang == "ru" else "3 days"
+    if d == 7:
+        return "7 днів" if lang == "uk" else "7 дней" if lang == "ru" else "7 days"
     if d == 30:
         return "1 місяць" if lang == "uk" else "1 месяц" if lang == "ru" else "1 month"
     if d == 90:
@@ -364,11 +373,11 @@ DYNAMIC_TEMPLATE_SPECS = {
         },
     },
     "referrals": {
-        "vars": ["referral_link", "referral_percent", "invited_count", "purchases_count", "earned_total", "available_total", "paid_total"],
+        "vars": ["referral_link", "normal_count", "premium_count", "bonus_days_total", "access_left", "normal_days", "normal_limit", "premium_days"],
         "default": {
-            "uk": "🤝 Реферальна система\n\nЗапрошуй друзів у VERTUU SPY BOT і отримуй {referral_percent}% з кожної їхньої покупки.\n\n🔗 Твоє посилання:\n{referral_link}\n\n👥 Запрошено: {invited_count}\n🛒 Покупок: {purchases_count}\n💰 Зароблено: ${earned_total}\n💵 Доступно: ${available_total}\n✅ Виплачено: ${paid_total}",
-            "ru": "🤝 Реферальная система\n\nПриглашай друзей в VERTUU SPY BOT и получай {referral_percent}% с каждой их покупки.\n\n🔗 Твоя ссылка:\n{referral_link}\n\n👥 Приглашено: {invited_count}\n🛒 Покупок: {purchases_count}\n💰 Заработано: ${earned_total}\n💵 Доступно: ${available_total}\n✅ Выплачено: ${paid_total}",
-            "en": "🤝 Referral system\n\nInvite friends to VERTUU SPY BOT and earn {referral_percent}% from every purchase they make.\n\n🔗 Your link:\n{referral_link}\n\n👥 Invited: {invited_count}\n🛒 Purchases: {purchases_count}\n💰 Earned: ${earned_total}\n💵 Available: ${available_total}\n✅ Paid: ${paid_total}",
+            "uk": "🤝 Реферальна система\n\nЗапрошуй друзів — отримуй дні Premium.\n• Звичайний реферал: +{normal_days} дн. (до {normal_limit} рефералів)\n• Premium-реферал: +{premium_days} дн.\n\n🔗 Твоє посилання:\n{referral_link}\n\n👥 Звичайних: {normal_count}\n💎 Premium: {premium_count}\n🎁 Зароблено днів: {bonus_days_total}\n⏳ Доступ до: {access_left}",
+            "ru": "🤝 Реферальная система\n\nПриглашай друзей — получай дни Premium.\n• Обычный реферал: +{normal_days} дн. (до {normal_limit} рефералов)\n• Premium-реферал: +{premium_days} дн.\n\n🔗 Твоя ссылка:\n{referral_link}\n\n👥 Обычных: {normal_count}\n💎 Premium: {premium_count}\n🎁 Заработано дней: {bonus_days_total}\n⏳ Доступ до: {access_left}",
+            "en": "🤝 Referral system\n\nInvite friends — earn Premium days.\n• Normal referral: +{normal_days}d (up to {normal_limit})\n• Premium referral: +{premium_days}d\n\n🔗 Your link:\n{referral_link}\n\n👥 Normal: {normal_count}\n💎 Premium: {premium_count}\n🎁 Days earned: {bonus_days_total}\n⏳ Access until: {access_left}",
         },
     },
     "choose_payment": {
@@ -735,6 +744,22 @@ def state_prompt(lang: str, state: str, payload: dict[str, Any]) -> str:
         return "✏️ Надішли новий контент для повідомлення: текст або фото/відео/GIF/файл з підписом. Premium emoji, жирний, курсив, посилання та перенос рядків збережуться."
     if state == "admin_create_plan":
         return "➕ Надішли новий тариф у форматі:\n<code>code price days Назва тарифу</code>\n\nПриклад:\n<code>vip_week 0.99 7 VIP 7 днів</code>"
+    if state == "admin_broadcast_template":
+        return (
+            "📝 <b>Шаблон розсилки</b>\n\n"
+            "Перешли або надішли боту повідомлення, яке треба розсилати: текст, фото, відео, GIF, документ, аудіо, голос, відеоповідомлення, стікер або альбом.\n\n"
+            "Бот скопіює його в чати в оригінальному вигляді. Для альбому перешли всі частини поспіль."
+        )
+    if state == "admin_broadcast_add":
+        return (
+            "➕ <b>Додати чат</b>\n\n"
+            "Перешли боту будь-яке повідомлення з потрібної групи/каналу або надішли числовий chat_id.\n\n"
+            "Важливо: бот має бути адміністратором у цьому чаті (з правом видаляти повідомлення)."
+        )
+    if state == "admin_broadcast_interval":
+        return "⏱ Надішли інтервал розсилки у хвилинах. Приклад: <code>15</code>"
+    if state == "admin_ref_bonus":
+        return "✏️ Надішли <code>user_id днів</code>. Приклад: <code>123456789 5</code>"
     return "Надішли значення або натисни Скасувати."
 
 
@@ -891,6 +916,8 @@ class BotHandlers:
                 await self.handle_edited_business_message(update["edited_business_message"])
             elif "deleted_business_messages" in update:
                 await self.handle_deleted_business_messages(update["deleted_business_messages"])
+            elif "my_chat_member" in update:
+                await self.handle_my_chat_member(update["my_chat_member"])
         except Exception as exc:
             print("Update handling error:", repr(exc), json.dumps(update, ensure_ascii=False)[:2000])
 
@@ -1076,6 +1103,12 @@ class BotHandlers:
 
 
     async def handle_message(self, msg: dict[str, Any]) -> None:
+        chat = msg.get("chat") or {}
+        # The bot's private UI only makes sense in 1:1 chats. Group/supergroup/
+        # channel messages are ignored here so the bot never spams menus in chats
+        # it was added to (broadcast targets are managed separately).
+        if chat.get("type") and chat.get("type") != "private":
+            return
         user_obj = msg.get("from") or {}
         user = await self.db.upsert_user(user_obj)
         if not user:
@@ -1103,6 +1136,14 @@ class BotHandlers:
             if state_name == "admin_upload_connect_video" and is_admin and not text.startswith("/"):
                 await self.handle_admin_upload_connect_video(tg_id, lang, msg, state)
                 return
+            if state_name == "admin_broadcast_template" and is_admin and not text.startswith("/"):
+                await self.handle_broadcast_template_message(tg_id, lang, msg, state)
+                return
+            if state_name == "admin_broadcast_add" and is_admin and not text.startswith("/"):
+                # Forwarded message from the target chat (may carry no text).
+                if msg.get("forward_from_chat") or (msg.get("forward_origin") or {}).get("chat"):
+                    await self.handle_broadcast_add_message(tg_id, lang, msg, state)
+                    return
             if state_name == "admin_edit_message" and is_admin:
                 # Important: allow replacement text to start with /edit too.
                 await self.handle_admin_edit_content(tg_id, lang, msg, state)
@@ -1127,10 +1168,12 @@ class BotHandlers:
             if len(parts) > 1 and parts[1].startswith("ref_"):
                 try:
                     referrer_id = int(parts[1].split("_", 1)[1])
-                    if await self.db.set_referrer(tg_id, referrer_id):
-                        await self.bot.send_message(tg_id, "🤝 <b>Реферальне запрошення прийнято.</b>")
-                except Exception:
-                    pass
+                    referred_is_premium = bool(user_obj.get("is_premium"))
+                    result = await self.db.process_referral(tg_id, referrer_id, referred_is_premium)
+                    if result:
+                        await self.notify_referral_result(referrer_id, result)
+                except Exception as exc:
+                    print("Referral processing error:", repr(exc), flush=True)
             await self.show_start(tg_id, lang, is_admin)
         elif text in {"/language", "/lang"}:
             await self.show_language_screen(tg_id, lang)
@@ -1451,19 +1494,88 @@ class BotHandlers:
                 await self.bot.send_message(tg_id, f"✅ Доступ забрано у <code>{target}</code>.", admin_menu(lang))
                 return
 
+            if state == "admin_ref_bonus":
+                parts = text.replace(",", " ").split()
+                target = int(parts[0])
+                days = int(parts[1]) if len(parts) > 1 else 0
+                until = await self.db.add_manual_referral_bonus(target, days, admin_id=tg_id, note="admin panel")
+                await self.db.clear_state(tg_id)
+                await self.bot.send_message(tg_id, f"✅ Нараховано {days} дн. користувачу <code>{target}</code>. Доступ до {dt(until)}", admin_menu(lang))
+                return
+
+            if state == "admin_broadcast_interval":
+                minutes = int(text.strip())
+                chat_id = int(payload["chat_id"])
+                await self.db.set_broadcast_interval(chat_id, minutes * 60)
+                await self.db.clear_state(tg_id)
+                await self.bot.send_message(tg_id, f"✅ Інтервал для чату <code>{chat_id}</code>: {minutes} хв.")
+                await self.show_broadcast_chat(tg_id, lang, chat_id)
+                return
+
+            if state == "admin_broadcast_add":
+                # Text path: a numeric chat_id was sent (the forward path is handled
+                # earlier in handle_message because it may carry no text).
+                raw = text.strip().split()[0]
+                chat_id = int(raw)
+                await self.db.add_broadcast_chat(chat_id, added_by=tg_id)
+                await self.db.clear_state(tg_id)
+                await self.bot.send_message(tg_id, f"✅ Чат <code>{chat_id}</code> додано до розсилок.")
+                await self.show_broadcasts(tg_id, lang)
+                return
+
             await self.db.clear_state(tg_id)
             await self.show_menu_screen(tg_id, lang, is_admin)
         except Exception as exc:
             await self.bot.send_message(tg_id, f"❌ Помилка:\n<code>{e(repr(exc))}</code>", cancel_keyboard(lang, "admin" if is_admin else "menu"))
 
     async def show_start(self, tg_id: int, lang: str, is_admin: bool) -> None:
+        # First-ever launch grants a one-time free trial. The DB call is atomic
+        # and idempotent, so it is safe to call on every /start.
+        try:
+            granted = await self.db.grant_trial_if_new(tg_id)
+            if granted:
+                await self.bot.send_message(tg_id, tr(lang, "trial_granted", days=granted))
+        except Exception as exc:
+            print("Trial grant error:", repr(exc), flush=True)
         key = f"start_{lang}"
         tpl = await self.db.get_template(key)
         if tpl:
             await self.send_template_screen(tg_id, tpl, main_menu(lang, is_admin), track_key=key)
-            return
-        result = await self.bot.send_message(tg_id, tr(lang, "start", app=e(self.settings.app_name)), main_menu(lang, is_admin))
-        await self.track_sent(result, tg_id, key)
+        else:
+            result = await self.bot.send_message(tg_id, tr(lang, "start", app=e(self.settings.app_name)), main_menu(lang, is_admin))
+            await self.track_sent(result, tg_id, key)
+        # If the trial/subscription has lapsed, gently prompt to subscribe.
+        if not is_admin and not await self.db.active_subscription(tg_id):
+            await self.bot.send_message(tg_id, tr(lang, "access_locked"), plans_keyboard(lang, await self.db.plans(True)))
+
+    async def notify_referral_result(self, referrer_id: int, result: dict[str, Any]) -> None:
+        """Tell the referrer they earned bonus days (or hit the normal limit)."""
+        try:
+            lang = await self.user_lang(referrer_id)
+            if result.get("kind") == "premium":
+                text = tr(lang, "ref_earned_premium", days=result.get("bonus_days", 0))
+            elif result.get("limit_reached"):
+                text = tr(lang, "ref_limit_reached")
+            elif result.get("bonus_days"):
+                text = tr(lang, "ref_earned_normal", days=result.get("bonus_days", 0))
+            else:
+                return
+            await self.safe_send(referrer_id, text)
+        except Exception as exc:
+            print("notify_referral_result error:", repr(exc), flush=True)
+
+    async def maybe_nudge_subscription(self, owner_id: int, lang: str) -> None:
+        """Send a subscription prompt at most once per 12h to a locked user."""
+        try:
+            key = f"sub_nudge_{owner_id}"
+            now_ts = int(datetime.now(timezone.utc).timestamp())
+            last = int(await self.db.get_setting(key, 0) or 0)
+            if now_ts - last < 12 * 3600:
+                return
+            await self.db.set_setting(key, now_ts)
+            await self.safe_send(owner_id, tr(lang, "access_locked"), plans_keyboard(lang, await self.db.plans(True)))
+        except Exception as exc:
+            print("maybe_nudge_subscription error:", repr(exc), flush=True)
 
     def support_text(self, lang: str) -> str:
         if lang == "ru":
@@ -1802,23 +1914,28 @@ class BotHandlers:
         return f"https://t.me/{self.bot_username()}?start=ref_{int(tg_id)}"
 
     async def show_referrals(self, tg_id: int, lang: str, edit: tuple[int, int] | None = None) -> None:
-        stats = await self.db.referral_stats(tg_id)
-        percent = await self.db.get_setting("referral_percent", 30)
+        stats = await self.db.referral_user_stats(tg_id)
+        normal_days = await self.db.get_setting("ref_normal_days", 2)
+        normal_limit = await self.db.get_setting("ref_normal_limit", 3)
+        premium_days = await self.db.get_setting("ref_premium_days", 5)
+        sub_until = stats.get("subscription_until")
+        access_left = dt(sub_until) if sub_until and sub_until > datetime.now(timezone.utc) else ("—" if lang != "en" else "—")
         values = {
             "referral_link": self.referral_link(tg_id),
-            "referral_percent": str(percent),
-            "invited_count": str(stats.get("invited") or 0),
-            "purchases_count": str(stats.get("purchases") or 0),
-            "earned_total": str(stats.get("earned") or "0.00"),
-            "available_total": str(stats.get("available") or "0.00"),
-            "paid_total": str(stats.get("paid") or "0.00"),
+            "normal_count": str(stats.get("normal_count") or 0),
+            "premium_count": str(stats.get("premium_count") or 0),
+            "bonus_days_total": str(stats.get("bonus_days") or 0),
+            "access_left": access_left,
+            "normal_days": str(normal_days),
+            "normal_limit": str(normal_limit),
+            "premium_days": str(premium_days),
         }
         key = f"referrals_{lang}"
+        keyboard = referral_keyboard(lang, self.bot_username(), tg_id)
         tpl = await self.db.get_template(key)
         if tpl:
             rendered, ents = render_dynamic_template(str(tpl.get("text") or ""), tpl.get("entities") or [], values)
             media = tpl.get("media")
-            keyboard = referral_keyboard(lang, self.bot_username(), tg_id)
             if media:
                 if edit:
                     chat_id, message_id = edit
@@ -1834,37 +1951,40 @@ class BotHandlers:
         if lang == "en":
             text = (
                 f"🤝 <b>Referral system</b>\n\n"
-                f"Invite friends to VERTUU SPY BOT and earn <b>{e(percent)}%</b> from every purchase they make.\n\n"
+                f"Invite friends and earn Premium days:\n"
+                f"• Normal referral: <b>+{e(normal_days)}d</b> (up to {e(normal_limit)})\n"
+                f"• Premium referral: <b>+{e(premium_days)}d</b>\n\n"
                 f"🔗 <b>Your link:</b>\n<code>{e(values['referral_link'])}</code>\n\n"
-                f"👥 Invited: <b>{e(values['invited_count'])}</b>\n"
-                f"🛒 Purchases: <b>{e(values['purchases_count'])}</b>\n"
-                f"💰 Earned: <b>${e(values['earned_total'])}</b>\n"
-                f"💵 Available: <b>${e(values['available_total'])}</b>\n"
-                f"✅ Paid: <b>${e(values['paid_total'])}</b>"
+                f"👥 Normal: <b>{e(values['normal_count'])}</b>\n"
+                f"💎 Premium: <b>{e(values['premium_count'])}</b>\n"
+                f"🎁 Days earned: <b>{e(values['bonus_days_total'])}</b>\n"
+                f"⏳ Access until: <b>{e(values['access_left'])}</b>"
             )
         elif lang == "ru":
             text = (
                 f"🤝 <b>Реферальная система</b>\n\n"
-                f"Приглашай друзей в VERTUU SPY BOT и получай <b>{e(percent)}%</b> с каждой их покупки.\n\n"
+                f"Приглашай друзей и получай дни Premium:\n"
+                f"• Обычный реферал: <b>+{e(normal_days)} дн.</b> (до {e(normal_limit)})\n"
+                f"• Premium-реферал: <b>+{e(premium_days)} дн.</b>\n\n"
                 f"🔗 <b>Твоя ссылка:</b>\n<code>{e(values['referral_link'])}</code>\n\n"
-                f"👥 Приглашено: <b>{e(values['invited_count'])}</b>\n"
-                f"🛒 Покупок: <b>{e(values['purchases_count'])}</b>\n"
-                f"💰 Заработано: <b>${e(values['earned_total'])}</b>\n"
-                f"💵 Доступно: <b>${e(values['available_total'])}</b>\n"
-                f"✅ Выплачено: <b>${e(values['paid_total'])}</b>"
+                f"👥 Обычных: <b>{e(values['normal_count'])}</b>\n"
+                f"💎 Premium: <b>{e(values['premium_count'])}</b>\n"
+                f"🎁 Заработано дней: <b>{e(values['bonus_days_total'])}</b>\n"
+                f"⏳ Доступ до: <b>{e(values['access_left'])}</b>"
             )
         else:
             text = (
                 f"🤝 <b>Реферальна система</b>\n\n"
-                f"Запрошуй друзів у VERTUU SPY BOT і отримуй <b>{e(percent)}%</b> з кожної їхньої покупки.\n\n"
+                f"Запрошуй друзів і отримуй дні Premium:\n"
+                f"• Звичайний реферал: <b>+{e(normal_days)} дн.</b> (до {e(normal_limit)})\n"
+                f"• Premium-реферал: <b>+{e(premium_days)} дн.</b>\n\n"
                 f"🔗 <b>Твоє посилання:</b>\n<code>{e(values['referral_link'])}</code>\n\n"
-                f"👥 Запрошено: <b>{e(values['invited_count'])}</b>\n"
-                f"🛒 Покупок: <b>{e(values['purchases_count'])}</b>\n"
-                f"💰 Зароблено: <b>${e(values['earned_total'])}</b>\n"
-                f"💵 Доступно: <b>${e(values['available_total'])}</b>\n"
-                f"✅ Виплачено: <b>${e(values['paid_total'])}</b>"
+                f"👥 Звичайних: <b>{e(values['normal_count'])}</b>\n"
+                f"💎 Premium: <b>{e(values['premium_count'])}</b>\n"
+                f"🎁 Зароблено днів: <b>{e(values['bonus_days_total'])}</b>\n"
+                f"⏳ Доступ до: <b>{e(values['access_left'])}</b>"
             )
-        await self._send_or_edit(tg_id, text, referral_keyboard(lang, self.bot_username(), tg_id), edit, track_key=f"referrals_{lang}")
+        await self._send_or_edit(tg_id, text, keyboard, edit, track_key=f"referrals_{lang}")
 
     async def track_sent(self, result: Any, fallback_chat_id: int, track_key: str | None) -> None:
         """Record (chat_id, message_id) -> template_key for deterministic /edit.
@@ -2394,6 +2514,40 @@ class BotHandlers:
             await self.show_admin_pending(tg_id, lang, edit)
         elif data == "admin_referrals":
             await self.show_admin_referrals(tg_id, lang, edit)
+        elif data == "adm_ref_bonus":
+            await self.db.set_state(tg_id, "admin_ref_bonus", {})
+            await self._send_or_edit(tg_id, state_prompt(lang, "admin_ref_bonus", {}), cancel_keyboard(lang, "admin_referrals"), edit)
+        elif data == "admin_broadcast":
+            await self.db.clear_state(tg_id)
+            await self.show_broadcasts(tg_id, lang, edit)
+        elif data == "bc_template":
+            await self.db.set_state(tg_id, "admin_broadcast_template", {})
+            await self._send_or_edit(tg_id, state_prompt(lang, "admin_broadcast_template", {}), cancel_keyboard(lang, "admin_broadcast"), edit)
+        elif data == "bc_add":
+            await self.db.set_state(tg_id, "admin_broadcast_add", {})
+            await self._send_or_edit(tg_id, state_prompt(lang, "admin_broadcast_add", {}), cancel_keyboard(lang, "admin_broadcast"), edit)
+        elif data.startswith("bc_chat:"):
+            await self.show_broadcast_chat(tg_id, lang, int(data.split(":", 1)[1]), edit)
+        elif data.startswith("bc_int_custom:"):
+            chat_id = int(data.split(":", 1)[1])
+            await self.db.set_state(tg_id, "admin_broadcast_interval", {"chat_id": chat_id})
+            await self._send_or_edit(tg_id, state_prompt(lang, "admin_broadcast_interval", {}), cancel_keyboard(lang, "admin_broadcast"), edit)
+        elif data.startswith("bc_int:"):
+            _, chat_id_s, sec_s = data.split(":", 2)
+            await self.db.set_broadcast_interval(int(chat_id_s), int(sec_s))
+            await self.show_broadcast_chat(tg_id, lang, int(chat_id_s), edit)
+        elif data.startswith("bc_toggle:"):
+            chat_id = int(data.split(":", 1)[1])
+            c = await self.db.get_broadcast_chat(chat_id)
+            if c:
+                await self.db.set_broadcast_active(chat_id, not c.get("is_active"))
+            await self.show_broadcast_chat(tg_id, lang, chat_id, edit)
+        elif data.startswith("bc_remove:"):
+            await self.db.remove_broadcast_chat(int(data.split(":", 1)[1]))
+            await self.show_broadcasts(tg_id, lang, edit)
+        elif data == "bc_send_now":
+            sent = await self.broadcast_send_now()
+            await self._send_or_edit(tg_id, f"🚀 Розіслано в <b>{sent}</b> чат(ів).", back_menu(lang, "admin_broadcast"), edit)
         elif data.startswith("admin_payment:"):
             await self.show_admin_payment(tg_id, lang, int(data.split(":", 1)[1]), edit)
         elif data.startswith("admin_proof:"):
@@ -2543,27 +2697,26 @@ class BotHandlers:
                 "〰️〰️〰️〰️〰️〰️〰️〰️〰️",
                 "",
                 "🤝 <b>РЕФЕРАЛИ:</b>",
-                f"🛒 Реферальних продажів: <b>{e(ref.get('rewards_count', 0))}</b>",
-                f"💰 Нараховано партнерам: <b>${fmt_usd(ref.get('rewards_total', 0))}</b>",
-                f"💵 Доступно до виплати: <b>${fmt_usd(ref.get('rewards_available', 0))}</b>",
-                f"✅ Виплачено: <b>${fmt_usd(ref.get('rewards_paid', 0))}</b>",
+                f"👥 Всього рефералів: <b>{e(ref.get('total_referrals', 0))}</b>",
+                f"🟢 Звичайних: <b>{e(ref.get('normal_referrals', 0))}</b>",
+                f"💎 Premium: <b>{e(ref.get('premium_referrals', 0))}</b>",
+                f"🎁 Нараховано днів: <b>{e(ref.get('bonus_days_total', 0))}</b>",
             ]
 
         await self._send_or_edit(tg_id, "\n".join(lines), back_menu(lang, "admin"), edit)
 
     async def show_admin_referrals(self, tg_id: int, lang: str, edit: tuple[int, int] | None = None) -> None:
-        s = await self.db.admin_referral_stats()
+        s = await self.db.admin_referral_overview()
         lines = [
             "🤝 <b>Реферальна система</b>",
             "",
-            f"👥 Реферальних користувачів: <b>{e(s.get('referred_users') or 0)}</b>",
-            f"🛒 Реферальних покупок: <b>{e(s.get('reward_count') or 0)}</b>",
-            f"💳 Продажів через рефки: <b>${e(s.get('referred_sales') or '0.00')}</b>",
-            f"💰 Нараховано партнерам: <b>${e(s.get('rewards_total') or '0.00')}</b>",
-            f"💵 Доступно до виплати: <b>${e(s.get('rewards_available') or '0.00')}</b>",
-            f"✅ Виплачено: <b>${e(s.get('rewards_paid') or '0.00')}</b>",
+            f"👤 Рефоводів: <b>{e(s.get('referrers') or 0)}</b>",
+            f"👥 Всього рефералів: <b>{e(s.get('total_referrals') or 0)}</b>",
+            f"🟢 Звичайних: <b>{e(s.get('normal_referrals') or 0)}</b>",
+            f"💎 Premium: <b>{e(s.get('premium_referrals') or 0)}</b>",
+            f"🎁 Нараховано днів: <b>{e(s.get('bonus_days_total') or 0)}</b>",
             "",
-            "🏆 <b>Топ партнерів:</b>",
+            "🏆 <b>Топ рефоводів:</b>",
         ]
         top = s.get("top") or []
         if not top:
@@ -2572,9 +2725,14 @@ class BotHandlers:
             name = display_name(row) or str(row.get("tg_id"))
             lines.append(
                 f"• <code>{e(row.get('tg_id'))}</code> @{e(row.get('username') or '')} {e(name)}\n"
-                f"  👥 {e(row.get('invited') or 0)} | 💰 ${e(row.get('earned') or '0.00')} | 💵 ${e(row.get('available') or '0.00')}"
+                f"  🟢 {e(row.get('normal_count') or 0)} | 💎 {e(row.get('premium_count') or 0)} | 🎁 {e(row.get('bonus_days') or 0)} дн."
             )
-        await self._send_or_edit(tg_id, "\n".join(lines), back_menu(lang, "admin"), edit)
+        lines += ["", "✏️ Ручне коригування: <code>/ref_bonus &lt;user_id&gt; &lt;днів&gt;</code>"]
+        keyboard = inline([
+            [("✏️ Нарахувати дні", "adm_ref_bonus")],
+            [(btn(lang, "back"), "admin")],
+        ])
+        await self._send_or_edit(tg_id, "\n".join(lines), keyboard, edit)
 
     async def show_admin_plans(self, tg_id: int, lang: str, edit: tuple[int, int] | None = None) -> None:
         plans = await self.db.plans(active_only=False)
@@ -2674,6 +2832,179 @@ class BotHandlers:
             sub = "✅" if u.get("subscription_until") and u["subscription_until"] > datetime.now(timezone.utc) else "—"
             lines.append(f"{sub} <code>{u['tg_id']}</code> {e(name)} @{e(u.get('username') or '')}\n<code>{dt(u.get('created_at'))}</code>")
         await self._send_or_edit(tg_id, "\n\n".join(lines), back_menu(lang, "admin"), edit)
+
+    # ===================== Broadcast system =====================
+
+    @staticmethod
+    def interval_label(seconds: int) -> str:
+        seconds = int(seconds or 0)
+        if seconds % 3600 == 0 and seconds >= 3600:
+            return f"{seconds // 3600} год"
+        return f"{max(1, seconds // 60)} хв"
+
+    async def show_broadcasts(self, tg_id: int, lang: str, edit: tuple[int, int] | None = None) -> None:
+        if not await self.db.is_admin(tg_id):
+            await self._send_or_edit(tg_id, tr(lang, "not_admin"), back_menu(lang), edit)
+            return
+        chats = await self.db.list_broadcast_chats()
+        tpl = await self.db.get_setting("broadcast_template", None)
+        has_tpl = bool(isinstance(tpl, dict) and tpl.get("message_ids"))
+        lines = [
+            "📢 <b>Автоматичні розсилки</b>",
+            "",
+            f"📝 Шаблон: <b>{'✅ збережено' if has_tpl else '— не задано'}</b>",
+            f"💬 Чатів підключено: <b>{len(chats)}</b>",
+        ]
+        if chats:
+            lines.append("")
+            for c in chats:
+                status = "✅" if c.get("is_active") else "⏸"
+                title = e(c.get("title") or str(c.get("chat_id")))
+                last = dt(c.get("last_sent_at")) if c.get("last_sent_at") else "—"
+                lines.append(f"{status} <b>{title}</b>\n   ⏱ {e(self.interval_label(c.get('interval_seconds')))} · остання: {last}")
+        else:
+            lines += ["", "Зроби бота адміністратором у групі — він додасться автоматично, або натисни «➕ Додати чат»."]
+        lines += ["", "ℹ️ Перед кожною новою розсилкою бот видаляє своє попереднє повідомлення в чаті."]
+        await self._send_or_edit(tg_id, "\n".join(lines), broadcast_menu_keyboard(lang, chats, has_tpl), edit)
+
+    async def show_broadcast_chat(self, tg_id: int, lang: str, chat_id: int, edit: tuple[int, int] | None = None) -> None:
+        c = await self.db.get_broadcast_chat(chat_id)
+        if not c:
+            await self.show_broadcasts(tg_id, lang, edit)
+            return
+        text = (
+            f"💬 <b>{e(c.get('title') or chat_id)}</b>\n"
+            f"<code>{e(chat_id)}</code>\n\n"
+            f"Статус: <b>{'✅ активний' if c.get('is_active') else '⏸ пауза'}</b>\n"
+            f"Інтервал: <b>{e(self.interval_label(c.get('interval_seconds')))}</b>\n"
+            f"Остання розсилка: <b>{dt(c.get('last_sent_at')) if c.get('last_sent_at') else '—'}</b>\n\n"
+            "Обери інтервал або керуй чатом:"
+        )
+        await self._send_or_edit(tg_id, text, broadcast_chat_keyboard(lang, chat_id, bool(c.get("is_active"))), edit)
+
+    async def handle_broadcast_template_message(self, tg_id: int, lang: str, msg: dict[str, Any], state_row: dict[str, Any]) -> None:
+        mid = msg.get("message_id")
+        if not mid:
+            return
+        mgid = msg.get("media_group_id")
+        now_ts = int(datetime.now(timezone.utc).timestamp())
+        existing = await self.db.get_setting("broadcast_template", None)
+        # Album parts arrive as separate updates with the same media_group_id;
+        # collect them into one template within a short window.
+        if (
+            mgid
+            and isinstance(existing, dict)
+            and existing.get("media_group_id") == str(mgid)
+            and existing.get("chat_id") == tg_id
+            and now_ts - int(existing.get("ts") or 0) < 20
+        ):
+            ids = list(existing.get("message_ids") or [])
+            if int(mid) not in ids:
+                ids.append(int(mid))
+            await self.db.set_setting("broadcast_template", {"chat_id": tg_id, "message_ids": ids, "media_group_id": str(mgid), "ts": now_ts})
+            return  # stay silent for extra album parts
+        tpl = {"chat_id": tg_id, "message_ids": [int(mid)], "media_group_id": str(mgid) if mgid else None, "ts": now_ts}
+        await self.db.set_setting("broadcast_template", tpl)
+        done_kb = inline([[("✅ Готово", "admin_broadcast")]])
+        await self.bot.send_message(
+            tg_id,
+            "✅ <b>Шаблон збережено.</b>\nЦе повідомлення буде розсилатися в підключені чати.\n\n"
+            "Для альбому перешли решту частин зараз. Коли готово — натисни кнопку нижче.",
+            done_kb,
+        )
+
+    async def handle_broadcast_add_message(self, tg_id: int, lang: str, msg: dict[str, Any], state_row: dict[str, Any]) -> None:
+        chat_obj = msg.get("forward_from_chat") or (msg.get("forward_origin") or {}).get("chat") or {}
+        if not chat_obj or not chat_obj.get("id"):
+            await self.bot.send_message(tg_id, "⚠️ Не вдалося визначити чат. Перешли повідомлення саме з потрібної групи/каналу або надішли числовий chat_id.")
+            return
+        chat_id = int(chat_obj["id"])
+        await self.db.add_broadcast_chat(chat_id, title=chat_obj.get("title"), chat_type=chat_obj.get("type"), added_by=tg_id)
+        await self.db.clear_state(tg_id)
+        await self.bot.send_message(tg_id, f"✅ Чат <b>{e(chat_obj.get('title') or chat_id)}</b> додано до розсилок.")
+        await self.show_broadcasts(tg_id, lang)
+
+    async def broadcast_to_chat(self, chat: dict[str, Any], template: dict[str, Any]) -> bool:
+        """Delete the bot's previous broadcast in the chat, then post the template.
+
+        Returns True if a new message was posted.
+        """
+        chat_id = int(chat["chat_id"])
+        from_chat = int(template.get("chat_id"))
+        message_ids = [int(x) for x in (template.get("message_ids") or [])]
+        if not message_ids:
+            return False
+        # Delete the previous broadcast message(s) so only one stays in the chat.
+        prev = await self.db.get_setting(f"bc_last_{chat_id}", []) or []
+        for pmid in prev:
+            try:
+                await self.bot.delete_message(chat_id, int(pmid))
+            except Exception:
+                pass
+        try:
+            sent = await self.bot.copy_messages(chat_id, from_chat, message_ids)
+            new_ids = [int(m["message_id"]) for m in sent if isinstance(m, dict) and m.get("message_id")]
+            await self.db.set_setting(f"bc_last_{chat_id}", new_ids)
+            await self.db.update_broadcast_sent(chat_id, new_ids[0] if new_ids else None)
+            return True
+        except Exception as exc:
+            text = repr(exc)
+            print("Broadcast send failed:", chat_id, text, flush=True)
+            # If the bot lost access / rights, pause the chat to stop log spam.
+            if any(t in text for t in ("chat not found", "bot was kicked", "not enough rights", "CHAT_ADMIN_REQUIRED", "have no rights", "blocked")):
+                try:
+                    await self.db.set_broadcast_active(chat_id, False)
+                except Exception:
+                    pass
+            # Still bump the timer so a broken chat does not get retried every tick.
+            await self.db.update_broadcast_sent(chat_id, None)
+            return False
+
+    async def run_due_broadcasts(self) -> int:
+        if not await self.db.get_setting_bool("broadcast_enabled", True):
+            return 0
+        template = await self.db.get_setting("broadcast_template", None)
+        if not isinstance(template, dict) or not template.get("message_ids"):
+            return 0
+        sent = 0
+        for chat in await self.db.due_broadcast_chats():
+            if await self.broadcast_to_chat(chat, template):
+                sent += 1
+        return sent
+
+    async def broadcast_send_now(self) -> int:
+        template = await self.db.get_setting("broadcast_template", None)
+        if not isinstance(template, dict) or not template.get("message_ids"):
+            return 0
+        sent = 0
+        for chat in await self.db.list_broadcast_chats(active_only=True):
+            if await self.broadcast_to_chat(chat, template):
+                sent += 1
+        return sent
+
+    async def handle_my_chat_member(self, upd: dict[str, Any]) -> None:
+        """Auto-register/unregister broadcast chats as the bot's admin status changes."""
+        chat = upd.get("chat") or {}
+        chat_id = chat.get("id")
+        ctype = chat.get("type")
+        new_member = upd.get("new_chat_member") or {}
+        status = new_member.get("status")
+        if not chat_id or ctype not in {"group", "supergroup", "channel"}:
+            return
+        if status == "administrator":
+            await self.db.add_broadcast_chat(int(chat_id), title=chat.get("title"), chat_type=ctype)
+            for admin_id in self.settings.admin_ids:
+                try:
+                    await self.bot.send_message(int(admin_id), f"📢 Бот став адміном у <b>{e(chat.get('title') or chat_id)}</b> — чат додано до розсилок.")
+                except Exception:
+                    pass
+        elif status in {"left", "kicked"}:
+            await self.db.remove_broadcast_chat(int(chat_id))
+        elif status == "member":
+            # Demoted from admin: cannot delete messages, so pause broadcasting.
+            existing = await self.db.get_broadcast_chat(int(chat_id))
+            if existing:
+                await self.db.set_broadcast_active(int(chat_id), False)
 
     async def handle_business_connection(self, data: dict[str, Any]) -> None:
         conn = await self.db.upsert_business_connection(data)
@@ -3375,6 +3706,11 @@ class BotHandlers:
         if not owner_id:
             return
         lang = await self.user_lang(owner_id)
+        # Access gate: deleted-message delivery requires an active subscription
+        # or the free trial. Locked users get a (rate-limited) subscribe prompt.
+        if not await self.db.active_subscription(owner_id):
+            await self.maybe_nudge_subscription(owner_id, lang)
+            return
         for message_id in data.get("message_ids") or []:
             try:
                 cached = await self.db.find_cached_message(bc_id, chat_id, int(message_id))
@@ -3841,6 +4177,20 @@ class BotHandlers:
                     value = raw_value
                 await self.db.set_setting(key, value)
                 await self.bot.send_message(admin_id, f"✅ Setting {e(key)} updated.")
+            elif cmd == "/ref_bonus" and len(parts) >= 3:
+                target = int(parts[1])
+                days = int(parts[2])
+                until = await self.db.add_manual_referral_bonus(target, days, admin_id=admin_id, note="command")
+                await self.bot.send_message(admin_id, f"✅ Нараховано {days} дн. користувачу <code>{target}</code>. Доступ до {dt(until)}")
+            elif cmd in {"/broadcast", "/broadcasts"}:
+                await self.show_broadcasts(admin_id, lang)
+            elif cmd == "/broadcast_now":
+                sent = await self.broadcast_send_now()
+                await self.bot.send_message(admin_id, f"🚀 Розіслано в {sent} чат(ів).")
+            elif cmd == "/broadcast_add" and len(parts) >= 2:
+                chat_id = int(parts[1])
+                await self.db.add_broadcast_chat(chat_id, added_by=admin_id)
+                await self.bot.send_message(admin_id, f"✅ Чат {chat_id} додано до розсилок.")
             elif cmd == "/cleanup":
                 deleted = await self.db.cleanup_old_messages()
                 await self.bot.send_message(admin_id, f"🧹 Cleanup done. Deleted rows: {deleted}")

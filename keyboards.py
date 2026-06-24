@@ -121,11 +121,11 @@ def cancel_keyboard(lang: str, to: str = "menu") -> dict[str, Any]:
 def referral_keyboard(lang: str, bot_username: str, user_id: int) -> dict[str, Any]:
     link = f"https://t.me/{bot_username}?start=ref_{user_id}"
     share_text = (
-        "Invite friends to VERTUU SPY BOT and earn 30% from their purchases."
+        "VERTUU SPY BOT saves deleted messages and disappearing media. Join via my link:"
         if lang == "en"
-        else "Приглашай друзей в VERTUU SPY BOT и получай 30% от их покупок."
+        else "VERTUU SPY BOT сохраняет удалённые сообщения и исчезающие медиа. Заходи по моей ссылке:"
         if lang == "ru"
-        else "Запрошуй друзів у VERTUU SPY BOT і отримуй 30% з їхніх покупок."
+        else "VERTUU SPY BOT зберігає видалені повідомлення та зникаючі медіа. Заходь за моїм посиланням:"
     )
     # Telegram share URL must be fully URL-encoded. Otherwise Cyrillic text and
     # symbols like % may be sent to chats as ugly %20/%D0... garbage.
@@ -143,8 +143,33 @@ def admin_menu(lang: str) -> dict[str, Any]:
         [(btn(lang, "admin_plans"), "admin_plans"), (btn(lang, "admin_methods"), "admin_methods")],
         [(btn(lang, "admin_grant"), "admin_grant"), (btn(lang, "admin_revoke"), "admin_revoke")],
         [(btn(lang, "admin_settings"), "admin_settings"), (btn(lang, "admin_users"), "admin_users")],
-        [(btn(lang, "admin_referrals"), "admin_referrals")],
+        [(btn(lang, "admin_referrals"), "admin_referrals"), (btn(lang, "admin_broadcast"), "admin_broadcast")],
         [(btn(lang, "back"), "menu")],
+    ])
+
+
+def broadcast_menu_keyboard(lang: str, chats: list[dict[str, Any]], has_template: bool) -> dict[str, Any]:
+    rows: list[list[tuple[str, str]]] = []
+    tpl_label = "📝 Шаблон ✅" if has_template else "📝 Задати шаблон"
+    rows.append([(tpl_label, "bc_template"), ("➕ Додати чат", "bc_add")])
+    for c in chats:
+        status = "✅" if c.get("is_active") else "⛔️"
+        title = (c.get("title") or str(c.get("chat_id")))[:24]
+        mins = max(1, int(c.get("interval_seconds") or 1800) // 60)
+        rows.append([(f"{status} {title} · {mins}хв", f"bc_chat:{c['chat_id']}")])
+    rows.append([("🚀 Розіслати зараз", "bc_send_now")])
+    rows.append([(btn(lang, "back"), "admin")])
+    return inline(rows)
+
+
+def broadcast_chat_keyboard(lang: str, chat_id: int, is_active: bool) -> dict[str, Any]:
+    return inline([
+        [("⏱ 5 хв", f"bc_int:{chat_id}:300"), ("⏱ 15 хв", f"bc_int:{chat_id}:900")],
+        [("⏱ 30 хв", f"bc_int:{chat_id}:1800"), ("⏱ 1 год", f"bc_int:{chat_id}:3600")],
+        [("⏱ 3 год", f"bc_int:{chat_id}:10800"), ("✍️ Свій інтервал", f"bc_int_custom:{chat_id}")],
+        [("⏸ Пауза" if is_active else "▶️ Увімкнути", f"bc_toggle:{chat_id}")],
+        [("🗑 Видалити чат", f"bc_remove:{chat_id}")],
+        [(btn(lang, "back"), "admin_broadcast")],
     ])
 
 
@@ -207,10 +232,10 @@ def admin_single_payment_keyboard(lang: str, payment_id: int) -> dict[str, Any]:
 
 def admin_settings_keyboard(lang: str) -> dict[str, Any]:
     return inline([
-        [("🎁 Free delete limit", "adm_set_setting:free_deleted_limit_per_day")],
-        [("🤝 Referral percent", "adm_set_setting:referral_percent"), ("₴ UAH/USD rate", "adm_set_setting:uah_rate")],
-        [("🧹 Free retention hours", "adm_set_setting:free_retention_hours")],
-        [("🗄 Paid retention days", "adm_set_setting:message_retention_days")],
+        [("🎁 Trial days", "adm_set_setting:trial_days"), ("🔒 Gating on/off", "adm_set_setting:access_gating_enabled")],
+        [("🟢 Ref normal days", "adm_set_setting:ref_normal_days"), ("🔢 Ref normal limit", "adm_set_setting:ref_normal_limit")],
+        [("💎 Ref premium days", "adm_set_setting:ref_premium_days")],
+        [("₴ UAH/USD rate", "adm_set_setting:uah_rate"), ("🗄 Paid retention days", "adm_set_setting:message_retention_days")],
         [("🎬 Завантажити відео-інструкцію", "adm_upload_connect_video")],
         [("🔗 URL відео-інструкції", "adm_set_setting:connect_video_url")],
         [("🧽 Cleanup now", "admin_cleanup")],

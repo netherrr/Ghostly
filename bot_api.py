@@ -48,6 +48,7 @@ class BotAPI:
                     "business_message",
                     "edited_business_message",
                     "deleted_business_messages",
+                    "my_chat_member",
                 ],
             },
         )
@@ -184,6 +185,32 @@ class BotAPI:
 
     async def delete_message(self, chat_id: int | str, message_id: int) -> dict[str, Any]:
         return await self.request("deleteMessage", {"chat_id": chat_id, "message_id": message_id})
+
+    async def copy_messages(
+        self,
+        chat_id: int | str,
+        from_chat_id: int | str,
+        message_ids: list[int],
+    ) -> list[dict[str, Any]]:
+        """Copy several messages at once (preserves media groups/albums)."""
+        result = await self.request(
+            "copyMessages",
+            {
+                "chat_id": chat_id,
+                "from_chat_id": from_chat_id,
+                "message_ids": list(message_ids),
+            },
+        )
+        return result if isinstance(result, list) else [result]
+
+    async def forward_message(self, chat_id: int | str, from_chat_id: int | str, message_id: int) -> dict[str, Any]:
+        return await self.request(
+            "forwardMessage",
+            {"chat_id": chat_id, "from_chat_id": from_chat_id, "message_id": message_id},
+        )
+
+    async def get_chat_member(self, chat_id: int | str, user_id: int) -> dict[str, Any]:
+        return await self.request("getChatMember", {"chat_id": chat_id, "user_id": user_id})
 
 
     async def get_file(self, file_id: str) -> dict[str, Any]:

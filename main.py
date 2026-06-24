@@ -20,6 +20,7 @@ bot = BotAPI(settings.bot_token)
 crypto = CryptoPayClient(settings.crypto_pay_token, settings.crypto_pay_api_url)
 handlers = BotHandlers(settings, db, bot, crypto)
 cleanup_task: asyncio.Task | None = None
+broadcast_task: asyncio.Task | None = None
 
 
 async def periodic_cleanup() -> None:
@@ -34,9 +35,24 @@ async def periodic_cleanup() -> None:
             print("Periodic cleanup error:", repr(exc))
 
 
+async def broadcast_scheduler() -> None:
+    # Tick every 30s and post to any chat whose interval has elapsed. Timing and
+    # last-message ids live in the DB, so the schedule survives restarts.
+    while True:
+        try:
+            await asyncio.sleep(30)
+            sent = await handlers.run_due_broadcasts()
+            if sent:
+                print(f"Broadcast tick: posted to {sent} chat(s)")
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            print("Broadcast scheduler error:", repr(exc))
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global cleanup_task
+    global cleanup_task, broadcast_task
     await db.connect()
     await bot.start()
     await crypto.start()
@@ -46,11 +62,14 @@ async def lifespan(app: FastAPI):
     else:
         print("WEBHOOK_BASE_URL is not set. Set it on Railway for Telegram webhooks.")
     cleanup_task = asyncio.create_task(periodic_cleanup())
+    broadcast_task = asyncio.create_task(broadcast_scheduler())
     try:
         yield
     finally:
         if cleanup_task:
             cleanup_task.cancel()
+        if broadcast_task:
+            broadcast_task.cancel()
         await bot.close()
         await crypto.close()
         await db.close()

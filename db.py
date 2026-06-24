@@ -231,6 +231,46 @@ class Database:
         CREATE INDEX IF NOT EXISTS idx_deleted_owner ON deleted_events(owner_tg_id, created_at DESC);
         CREATE INDEX IF NOT EXISTS idx_payments_user ON payments(user_id, created_at DESC);
         CREATE INDEX IF NOT EXISTS idx_sent_template_created ON sent_template_messages(created_at);
+
+        -- New referral model (days-based bonuses) + free trial tracking.
+        ALTER TABLE users ADD COLUMN IF NOT EXISTS trial_granted BOOLEAN NOT NULL DEFAULT FALSE;
+        ALTER TABLE users ADD COLUMN IF NOT EXISTS is_premium_user BOOLEAN NOT NULL DEFAULT FALSE;
+        ALTER TABLE users ADD COLUMN IF NOT EXISTS premium_checked_at TIMESTAMPTZ;
+
+        -- Each row is one referral accrual. referred_id is unique (when not null)
+        -- so a single Telegram account can be credited at most once. Manual admin
+        -- adjustments use kind='manual' with referred_id NULL.
+        CREATE TABLE IF NOT EXISTS referral_bonuses (
+            id BIGSERIAL PRIMARY KEY,
+            referrer_id BIGINT REFERENCES users(tg_id) ON DELETE CASCADE,
+            referred_id BIGINT REFERENCES users(tg_id) ON DELETE CASCADE,
+            kind TEXT NOT NULL DEFAULT 'normal',
+            is_premium BOOLEAN NOT NULL DEFAULT FALSE,
+            bonus_days INT NOT NULL DEFAULT 0,
+            counted BOOLEAN NOT NULL DEFAULT TRUE,
+            note TEXT,
+            admin_id BIGINT,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_referral_bonuses_referred
+            ON referral_bonuses(referred_id) WHERE referred_id IS NOT NULL;
+        CREATE INDEX IF NOT EXISTS idx_referral_bonuses_referrer
+            ON referral_bonuses(referrer_id, created_at DESC);
+
+        -- Auto-broadcast targets (groups/channels where the bot is admin).
+        CREATE TABLE IF NOT EXISTS broadcast_chats (
+            chat_id BIGINT PRIMARY KEY,
+            title TEXT,
+            chat_type TEXT,
+            interval_seconds INT NOT NULL DEFAULT 1800,
+            is_active BOOLEAN NOT NULL DEFAULT TRUE,
+            last_message_id BIGINT,
+            last_sent_at TIMESTAMPTZ,
+            added_by BIGINT,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+        CREATE INDEX IF NOT EXISTS idx_broadcast_active ON broadcast_chats(is_active);
         """
         async with self._pool().acquire() as con:
             await con.execute(sql)
@@ -279,46 +319,32 @@ class Database:
                     self.settings.default_lang,
                 )
 
-            # Paid access is one maximum tier (Pro). Different buttons are only
-            # different durations: 1 month, 3 months, 6 months, 1 year, lifetime.
-            # Old Basic/legacy monthly plans are disabled automatically.
+            # 2026 pricing model. Seven duration-based subscriptions with a single
+            # full-access tier. All earlier Pro/Basic tiers are disabled so old
+            # prices never resurface anywhere in the system.
             await con.execute(
                 """
                 UPDATE plans
                    SET is_active=FALSE, updated_at=NOW()
-                 WHERE code IN ('basic_month', 'pro_month')
+                 WHERE code IN ('basic_month', 'pro_month', 'pro_30', 'pro_90',
+                                'pro_180', 'pro_365', 'pro_lifetime')
                 """
             )
 
+            full_uk = '✅ Повний доступ до всіх функцій'
+            full_ru = '✅ Полный доступ ко всем функциям'
+            full_en = '✅ Full access to all features'
             await con.execute(
                 """
                 INSERT INTO plans(code, name_uk, name_ru, name_en, features_uk, features_ru, features_en, price_usd, price_uah, price_stars, duration_days, position, is_active)
                 VALUES
-                ('pro_30', 'Pro на 1 місяць', 'Pro на 1 месяц', 'Pro 1 month',
-                 '👻 Усі видалені повідомлення\n🔥 Зникаючі медіа: кружки/голосові/фото/відео\n✏️ Історія редагувань\n🔎 Ключові слова\n🛡 Антискам-сповіщення\n🗄 Зберігання 30 днів',
-                 '👻 Все удалённые сообщения\n🔥 Исчезающие медиа: кружки/голосовые/фото/видео\n✏️ История правок\n🔎 Ключевые слова\n🛡 Антискам-уведомления\n🗄 Хранение 30 дней',
-                 '👻 All deleted messages\n🔥 Disappearing media: video notes/voice/photos/videos\n✏️ Edit history\n🔎 Keywords\n🛡 Anti-scam alerts\n🗄 30-day storage',
-                 3.99, NULL, 75, 30, 10, TRUE),
-                ('pro_90', 'Pro на 3 місяці', 'Pro на 3 месяца', 'Pro 3 months',
-                 '👻 Усі видалені повідомлення\n🔥 Зникаючі медіа: кружки/голосові/фото/відео\n✏️ Історія редагувань\n🔎 Ключові слова\n🛡 Антискам-сповіщення\n🔥 Вигідніше на 3 місяці',
-                 '👻 Все удалённые сообщения\n🔥 Исчезающие медиа: кружки/голосовые/фото/видео\n✏️ История правок\n🔎 Ключевые слова\n🛡 Антискам-уведомления\n🔥 Выгоднее на 3 месяца',
-                 '👻 All deleted messages\n🔥 Disappearing media: video notes/voice/photos/videos\n✏️ Edit history\n🔎 Keywords\n🛡 Anti-scam alerts\n🔥 Better value for 3 months',
-                 9.99, NULL, 190, 90, 20, TRUE),
-                ('pro_180', 'Pro на 6 місяців', 'Pro на 6 месяцев', 'Pro 6 months',
-                 '👻 Усі видалені повідомлення\n🔥 Зникаючі медіа: кружки/голосові/фото/відео\n✏️ Історія редагувань\n🔎 Ключові слова\n🛡 Антискам-сповіщення\n💎 Найкраще для постійного користування',
-                 '👻 Все удалённые сообщения\n🔥 Исчезающие медиа: кружки/голосовые/фото/видео\n✏️ История правок\n🔎 Ключевые слова\n🛡 Антискам-уведомления\n💎 Лучший вариант для постоянного использования',
-                 '👻 All deleted messages\n🔥 Disappearing media: video notes/voice/photos/videos\n✏️ Edit history\n🔎 Keywords\n🛡 Anti-scam alerts\n💎 Best for regular use',
-                 17.99, NULL, 300, 180, 30, TRUE),
-                ('pro_365', 'Pro на 1 рік', 'Pro на 1 год', 'Pro 1 year',
-                 '👻 Усі видалені повідомлення\n🔥 Зникаючі медіа: кружки/голосові/фото/відео\n✏️ Історія редагувань\n🔎 Ключові слова\n🛡 Антискам-сповіщення\n🏆 Максимальна вигода на рік',
-                 '👻 Все удалённые сообщения\n🔥 Исчезающие медиа: кружки/голосовые/фото/видео\n✏️ История правок\n🔎 Ключевые слова\n🛡 Антискам-уведомления\n🏆 Максимальная выгода на год',
-                 '👻 All deleted messages\n🔥 Disappearing media: video notes/voice/photos/videos\n✏️ Edit history\n🔎 Keywords\n🛡 Anti-scam alerts\n🏆 Best yearly value',
-                 29.99, NULL, 450, 365, 40, TRUE),
-                ('pro_lifetime', 'Pro назавжди', 'Pro навсегда', 'Pro lifetime',
-                 '👻 Усі видалені повідомлення\n🔥 Зникаючі медіа: кружки/голосові/фото/відео\n✏️ Історія редагувань\n🔎 Ключові слова\n🛡 Антискам-сповіщення\n♾ Безлімітний доступ',
-                 '👻 Все удалённые сообщения\n🔥 Исчезающие медиа: кружки/голосовые/фото/видео\n✏️ История правок\n🔎 Ключевые слова\n🛡 Антискам-уведомления\n♾ Безлимитный доступ',
-                 '👻 All deleted messages\n🔥 Disappearing media: video notes/voice/photos/videos\n✏️ Edit history\n🔎 Keywords\n🛡 Anti-scam alerts\n♾ Lifetime access',
-                 79.99, NULL, 750, 36500, 50, TRUE)
+                ('sub_1d',   '1 день',     '1 день',     '1 day',     $1, $2, $3, 0.15, NULL, 15,  1,   10, TRUE),
+                ('sub_3d',   '3 дні',      '3 дня',      '3 days',    $1, $2, $3, 0.25, NULL, 25,  3,   20, TRUE),
+                ('sub_7d',   '7 днів',     '7 дней',     '7 days',    $1, $2, $3, 0.40, NULL, 40,  7,   30, TRUE),
+                ('sub_30d',  '1 місяць',   '1 месяц',    '1 month',   $1, $2, $3, 0.99, NULL, 99,  30,  40, TRUE),
+                ('sub_90d',  '3 місяці',   '3 месяца',   '3 months',  $1, $2, $3, 1.99, NULL, 199, 90,  50, TRUE),
+                ('sub_180d', '6 місяців',  '6 месяцев',  '6 months',  $1, $2, $3, 2.99, NULL, 299, 180, 60, TRUE),
+                ('sub_365d', '12 місяців', '12 месяцев', '12 months', $1, $2, $3, 3.99, NULL, 399, 365, 70, TRUE)
                 ON CONFLICT(code) DO UPDATE SET
                     name_uk=EXCLUDED.name_uk,
                     name_ru=EXCLUDED.name_ru,
@@ -327,34 +353,37 @@ class Database:
                     features_ru=EXCLUDED.features_ru,
                     features_en=EXCLUDED.features_en,
                     duration_days=EXCLUDED.duration_days,
-                    price_stars=COALESCE(plans.price_stars, EXCLUDED.price_stars),
                     position=EXCLUDED.position,
                     is_active=TRUE,
                     updated_at=NOW()
-                """
+                """,
+                full_uk, full_ru, full_en,
             )
 
-            # One-time correction for old Stars defaults. This only changes values
-            # that match the earlier test defaults, so manual admin edits are not overwritten.
-            await con.execute(
-                """
-                UPDATE plans
-                   SET price_stars = CASE code
-                        WHEN 'pro_30' THEN 75
-                        WHEN 'pro_90' THEN 190
-                        WHEN 'pro_180' THEN 300
-                        WHEN 'pro_365' THEN 450
-                        WHEN 'pro_lifetime' THEN 750
-                        ELSE price_stars
-                   END,
-                   updated_at=NOW()
-                 WHERE (code='pro_30' AND (price_stars IS NULL OR price_stars IN (50, 90)))
-                    OR (code='pro_90' AND (price_stars IS NULL OR price_stars IN (125, 200, 230)))
-                    OR (code='pro_180' AND (price_stars IS NULL OR price_stars IN (200, 330, 370)))
-                    OR (code='pro_365' AND (price_stars IS NULL OR price_stars IN (300, 500, 550)))
-                    OR (code='pro_lifetime' AND (price_stars IS NULL OR price_stars IN (500, 800, 900)))
-                """
-            )
+            # One-time price enforcement for the new model so a fresh deploy lands
+            # on the exact requested prices even if a partial seed ran earlier.
+            pricing_applied = await con.fetchval("SELECT value FROM settings WHERE key='pricing_model_2026_v1'")
+            if not pricing_applied:
+                await con.execute(
+                    """
+                    UPDATE plans SET
+                        price_usd = CASE code
+                            WHEN 'sub_1d' THEN 0.15 WHEN 'sub_3d' THEN 0.25
+                            WHEN 'sub_7d' THEN 0.40 WHEN 'sub_30d' THEN 0.99
+                            WHEN 'sub_90d' THEN 1.99 WHEN 'sub_180d' THEN 2.99
+                            WHEN 'sub_365d' THEN 3.99 ELSE price_usd END,
+                        price_stars = CASE code
+                            WHEN 'sub_1d' THEN 15 WHEN 'sub_3d' THEN 25
+                            WHEN 'sub_7d' THEN 40 WHEN 'sub_30d' THEN 99
+                            WHEN 'sub_90d' THEN 199 WHEN 'sub_180d' THEN 299
+                            WHEN 'sub_365d' THEN 399 ELSE price_stars END,
+                        updated_at=NOW()
+                     WHERE code IN ('sub_1d','sub_3d','sub_7d','sub_30d','sub_90d','sub_180d','sub_365d')
+                    """
+                )
+                await con.execute(
+                    "INSERT INTO settings(key, value) VALUES('pricing_model_2026_v1', 'true'::jsonb) ON CONFLICT(key) DO UPDATE SET value='true'::jsonb, updated_at=NOW()"
+                )
 
             await con.execute(
                 """
@@ -394,6 +423,15 @@ class Database:
                 "connect_video_kind": "video",
                 "referral_percent": 30,
                 "uah_rate": 44,
+                # New referral model (days-based bonuses).
+                "trial_days": 1,
+                "access_gating_enabled": True,
+                "ref_normal_days": 2,
+                "ref_normal_limit": 3,
+                "ref_premium_days": 5,
+                # Broadcast system defaults.
+                "broadcast_default_interval": 1800,
+                "broadcast_enabled": True,
             }
             for key, value in defaults.items():
                 await con.execute(
@@ -895,15 +933,20 @@ UQDbfUbzkI8lfO6G1KAPB_F2Et2IRTM4EvFhX5ATaXYrjoV3""",
         username = user.get("username")
         first_name = user.get("first_name")
         last_name = user.get("last_name")
+        # Telegram includes is_premium on the user object. Cache it so referral
+        # bonuses and stats can rely on it even after restarts.
+        is_premium = bool(user.get("is_premium")) if "is_premium" in user else None
         async with self._pool().acquire() as con:
             row = await con.fetchrow(
                 """
-                INSERT INTO users(tg_id, username, first_name, last_name, lang, is_admin)
-                VALUES($1, $2, $3, $4, COALESCE($5, $6), $7)
+                INSERT INTO users(tg_id, username, first_name, last_name, lang, is_admin, is_premium_user, premium_checked_at)
+                VALUES($1, $2, $3, $4, COALESCE($5, $6), $7, COALESCE($8, FALSE), CASE WHEN $8 IS NULL THEN NULL ELSE NOW() END)
                 ON CONFLICT(tg_id) DO UPDATE SET
                   username=EXCLUDED.username,
                   first_name=EXCLUDED.first_name,
                   last_name=EXCLUDED.last_name,
+                  is_premium_user=CASE WHEN $8 IS NULL THEN users.is_premium_user ELSE $8 END,
+                  premium_checked_at=CASE WHEN $8 IS NULL THEN users.premium_checked_at ELSE NOW() END,
                   updated_at=NOW()
                 RETURNING *
                 """,
@@ -914,6 +957,7 @@ UQDbfUbzkI8lfO6G1KAPB_F2Et2IRTM4EvFhX5ATaXYrjoV3""",
                 lang,
                 self.settings.default_lang,
                 tg_id in self.settings.admin_ids,
+                is_premium,
             )
             return dict(row)
 
@@ -956,9 +1000,15 @@ UQDbfUbzkI8lfO6G1KAPB_F2Et2IRTM4EvFhX5ATaXYrjoV3""",
             await con.execute("UPDATE users SET subscription_until=NULL, updated_at=NOW() WHERE tg_id=$1", tg_id)
 
     async def active_subscription(self, tg_id: int) -> bool:
-        # Open launch mode: all core protection features work without paid Pro.
-        # Set FREE_FULL_ACCESS=false in Railway when you want to restore paid gating.
-        if os.getenv("FREE_FULL_ACCESS", "true").lower() in {"1", "true", "yes", "on"}:
+        # Access model: admins always have access; otherwise an active subscription
+        # (or the free trial, which is stored as a normal subscription window) is
+        # required. Gating can be disabled in the DB (access_gating_enabled) or via
+        # the FREE_FULL_ACCESS env override for emergencies.
+        if tg_id in self.settings.admin_ids:
+            return True
+        if os.getenv("FREE_FULL_ACCESS", "false").lower() in {"1", "true", "yes", "on"}:
+            return True
+        if not await self.get_setting_bool("access_gating_enabled", True):
             return True
         row = await self.get_user(tg_id)
         return bool(row and row.get("subscription_until") and row["subscription_until"] > datetime.now(timezone.utc))
@@ -1121,28 +1171,8 @@ UQDbfUbzkI8lfO6G1KAPB_F2Et2IRTM4EvFhX5ATaXYrjoV3""",
                 until = start + timedelta(days=days)
                 await con.execute("UPDATE users SET subscription_until=$2, updated_at=NOW() WHERE tg_id=$1", user_id, until)
 
-                referrer_id = await con.fetchval("SELECT referrer_id FROM users WHERE tg_id=$1", user_id)
-                if referrer_id and int(referrer_id) != int(user_id):
-                    percent_raw = await con.fetchval("SELECT value FROM settings WHERE key='referral_percent'")
-                    try:
-                        percent = Decimal(str(decode_json(percent_raw, 30)))
-                    except Exception:
-                        percent = Decimal("30")
-                    reward = (Decimal(str(payment["amount_usd"])) * percent / Decimal("100")).quantize(Decimal("0.01"))
-                    await con.execute(
-                        """
-                        INSERT INTO referral_rewards(referrer_id, buyer_id, payment_id, percent, purchase_amount_usd, reward_amount_usd, raw)
-                        VALUES($1, $2, $3, $4, $5, $6, $7::jsonb)
-                        ON CONFLICT(payment_id) DO NOTHING
-                        """,
-                        int(referrer_id),
-                        user_id,
-                        int(payment_id),
-                        percent,
-                        Decimal(str(payment["amount_usd"])),
-                        reward,
-                        json.dumps({"source": "payment_paid"}),
-                    )
+                # Referral rewards are days-based (see referral_bonuses) and are
+                # granted at registration time, not per purchase.
 
                 payment["status"] = "paid"
                 payment["paid_until"] = until
@@ -1703,6 +1733,262 @@ UQDbfUbzkI8lfO6G1KAPB_F2Et2IRTM4EvFhX5ATaXYrjoV3""",
             )
             return dict(row) if row else None
 
+    # ----- Free trial -----
+
+    async def grant_trial_if_new(self, tg_id: int) -> int | None:
+        """Grant the one-time free trial to a brand-new user.
+
+        Returns the number of trial days granted, or None if the user already
+        used the trial or already has access. Atomic: the trial_granted flag is
+        flipped in the same statement so it can never be granted twice, even on
+        concurrent /start updates.
+        """
+        trial_days = int(await self.get_setting("trial_days", 1) or 0)
+        if trial_days <= 0:
+            return None
+        async with self._pool().acquire() as con:
+            row = await con.fetchrow(
+                """
+                UPDATE users
+                   SET trial_granted=TRUE,
+                       subscription_until=GREATEST(COALESCE(subscription_until, NOW()), NOW()) + ($2::TEXT || ' days')::INTERVAL,
+                       updated_at=NOW()
+                 WHERE tg_id=$1 AND trial_granted=FALSE
+                RETURNING subscription_until
+                """,
+                int(tg_id),
+                str(trial_days),
+            )
+            return trial_days if row else None
+
+    async def set_premium_flag(self, tg_id: int, is_premium: bool) -> None:
+        async with self._pool().acquire() as con:
+            await con.execute(
+                "UPDATE users SET is_premium_user=$2, premium_checked_at=NOW(), updated_at=NOW() WHERE tg_id=$1",
+                int(tg_id),
+                bool(is_premium),
+            )
+
+    # ----- Referral (days-based) -----
+
+    async def process_referral(self, referred_id: int, referrer_id: int, referred_is_premium: bool) -> dict[str, Any] | None:
+        """Register a referral and grant bonus days.
+
+        Antifraud rules enforced here:
+          * no self-referrals;
+          * the referrer must already exist;
+          * each referred account is credited at most once (unique referred_id);
+          * a user already linked to a referrer is never re-linked.
+
+        Returns a dict describing the accrual (kind, bonus_days, counted) or None
+        if the referral was rejected.
+        """
+        if not referred_id or not referrer_id or int(referred_id) == int(referrer_id):
+            return None
+        normal_days = int(await self.get_setting("ref_normal_days", 2) or 0)
+        normal_limit = int(await self.get_setting("ref_normal_limit", 3) or 0)
+        premium_days = int(await self.get_setting("ref_premium_days", 5) or 0)
+        async with self._pool().acquire() as con:
+            async with con.transaction():
+                ref_exists = await con.fetchval("SELECT 1 FROM users WHERE tg_id=$1", int(referrer_id))
+                if not ref_exists:
+                    return None
+                # One accrual per referred account, ever.
+                already = await con.fetchval("SELECT 1 FROM referral_bonuses WHERE referred_id=$1", int(referred_id))
+                if already:
+                    return None
+                # Link the user only if they are not linked yet.
+                linked = await con.fetchrow(
+                    """
+                    UPDATE users
+                       SET referrer_id=$2, referral_created_at=COALESCE(referral_created_at, NOW()), updated_at=NOW()
+                     WHERE tg_id=$1 AND referrer_id IS NULL
+                    RETURNING tg_id
+                    """,
+                    int(referred_id),
+                    int(referrer_id),
+                )
+                if not linked:
+                    return None
+
+                if referred_is_premium:
+                    kind = "premium"
+                    bonus_days = premium_days
+                    counted = True
+                else:
+                    kind = "normal"
+                    used = await con.fetchval(
+                        "SELECT COUNT(*) FROM referral_bonuses WHERE referrer_id=$1 AND kind='normal' AND bonus_days > 0",
+                        int(referrer_id),
+                    ) or 0
+                    if normal_limit <= 0 or int(used) < normal_limit:
+                        bonus_days = normal_days
+                    else:
+                        bonus_days = 0
+                    counted = True
+
+                await con.execute(
+                    """
+                    INSERT INTO referral_bonuses(referrer_id, referred_id, kind, is_premium, bonus_days, counted)
+                    VALUES($1, $2, $3, $4, $5, $6)
+                    """,
+                    int(referrer_id),
+                    int(referred_id),
+                    kind,
+                    bool(referred_is_premium),
+                    int(bonus_days),
+                    bool(counted),
+                )
+        granted_until = None
+        if bonus_days > 0:
+            granted_until = await self.grant_subscription(int(referrer_id), bonus_days)
+        return {
+            "referrer_id": int(referrer_id),
+            "kind": kind,
+            "is_premium": bool(referred_is_premium),
+            "bonus_days": int(bonus_days),
+            "granted_until": granted_until,
+            "limit_reached": (kind == "normal" and bonus_days == 0),
+        }
+
+    async def add_manual_referral_bonus(self, referrer_id: int, days: int, admin_id: int | None = None, note: str | None = None) -> datetime | None:
+        """Admin manual adjustment: record a bonus row and grant the days."""
+        days = int(days)
+        async with self._pool().acquire() as con:
+            await con.execute(
+                """
+                INSERT INTO referral_bonuses(referrer_id, referred_id, kind, is_premium, bonus_days, counted, note, admin_id)
+                VALUES($1, NULL, 'manual', FALSE, $2, FALSE, $3, $4)
+                """,
+                int(referrer_id),
+                days,
+                (note or "manual adjustment")[:200],
+                int(admin_id) if admin_id else None,
+            )
+        if days > 0:
+            return await self.grant_subscription(int(referrer_id), days)
+        return None
+
+    async def referral_user_stats(self, user_id: int) -> dict[str, Any]:
+        async with self._pool().acquire() as con:
+            row = await con.fetchrow(
+                """
+                SELECT
+                  (SELECT COUNT(*) FROM referral_bonuses WHERE referrer_id=$1 AND kind='normal') AS normal_count,
+                  (SELECT COUNT(*) FROM referral_bonuses WHERE referrer_id=$1 AND kind='premium') AS premium_count,
+                  (SELECT COALESCE(SUM(bonus_days),0) FROM referral_bonuses WHERE referrer_id=$1) AS bonus_days,
+                  (SELECT subscription_until FROM users WHERE tg_id=$1) AS subscription_until
+                """,
+                int(user_id),
+            )
+            return dict(row) if row else {"normal_count": 0, "premium_count": 0, "bonus_days": 0, "subscription_until": None}
+
+    async def admin_referral_overview(self) -> dict[str, Any]:
+        async with self._pool().acquire() as con:
+            totals = await con.fetchrow(
+                """
+                SELECT
+                  (SELECT COUNT(DISTINCT referrer_id) FROM referral_bonuses) AS referrers,
+                  (SELECT COUNT(*) FROM referral_bonuses WHERE referred_id IS NOT NULL) AS total_referrals,
+                  (SELECT COUNT(*) FROM referral_bonuses WHERE kind='normal') AS normal_referrals,
+                  (SELECT COUNT(*) FROM referral_bonuses WHERE kind='premium') AS premium_referrals,
+                  (SELECT COALESCE(SUM(bonus_days),0) FROM referral_bonuses) AS bonus_days_total
+                """
+            )
+            top = await con.fetch(
+                """
+                SELECT u.tg_id, u.username, u.first_name, u.last_name,
+                       COUNT(*) FILTER (WHERE rb.kind='normal') AS normal_count,
+                       COUNT(*) FILTER (WHERE rb.kind='premium') AS premium_count,
+                       COALESCE(SUM(rb.bonus_days),0) AS bonus_days
+                FROM referral_bonuses rb
+                JOIN users u ON u.tg_id=rb.referrer_id
+                GROUP BY u.tg_id
+                ORDER BY bonus_days DESC, premium_count DESC
+                LIMIT 10
+                """
+            )
+            result = dict(totals) if totals else {}
+            result["top"] = [dict(r) for r in top]
+            return result
+
+    # ----- Broadcast chats -----
+
+    async def list_broadcast_chats(self, active_only: bool = False) -> list[dict[str, Any]]:
+        sql = "SELECT * FROM broadcast_chats"
+        if active_only:
+            sql += " WHERE is_active=TRUE"
+        sql += " ORDER BY created_at"
+        async with self._pool().acquire() as con:
+            rows = await con.fetch(sql)
+            return [dict(r) for r in rows]
+
+    async def get_broadcast_chat(self, chat_id: int) -> dict[str, Any] | None:
+        async with self._pool().acquire() as con:
+            row = await con.fetchrow("SELECT * FROM broadcast_chats WHERE chat_id=$1", int(chat_id))
+            return dict(row) if row else None
+
+    async def add_broadcast_chat(self, chat_id: int, title: str | None = None, chat_type: str | None = None, added_by: int | None = None, interval_seconds: int | None = None) -> dict[str, Any]:
+        interval = int(interval_seconds) if interval_seconds else int(await self.get_setting("broadcast_default_interval", 1800) or 1800)
+        async with self._pool().acquire() as con:
+            row = await con.fetchrow(
+                """
+                INSERT INTO broadcast_chats(chat_id, title, chat_type, interval_seconds, added_by)
+                VALUES($1, $2, $3, $4, $5)
+                ON CONFLICT(chat_id) DO UPDATE SET
+                    title=COALESCE(EXCLUDED.title, broadcast_chats.title),
+                    chat_type=COALESCE(EXCLUDED.chat_type, broadcast_chats.chat_type),
+                    is_active=TRUE,
+                    updated_at=NOW()
+                RETURNING *
+                """,
+                int(chat_id),
+                title,
+                chat_type,
+                int(interval) if interval else 1800,
+                int(added_by) if added_by else None,
+            )
+            return dict(row)
+
+    async def remove_broadcast_chat(self, chat_id: int) -> None:
+        async with self._pool().acquire() as con:
+            await con.execute("DELETE FROM broadcast_chats WHERE chat_id=$1", int(chat_id))
+
+    async def set_broadcast_interval(self, chat_id: int, interval_seconds: int) -> None:
+        async with self._pool().acquire() as con:
+            await con.execute(
+                "UPDATE broadcast_chats SET interval_seconds=$2, updated_at=NOW() WHERE chat_id=$1",
+                int(chat_id),
+                max(30, int(interval_seconds)),
+            )
+
+    async def set_broadcast_active(self, chat_id: int, active: bool) -> None:
+        async with self._pool().acquire() as con:
+            await con.execute(
+                "UPDATE broadcast_chats SET is_active=$2, updated_at=NOW() WHERE chat_id=$1",
+                int(chat_id),
+                bool(active),
+            )
+
+    async def update_broadcast_sent(self, chat_id: int, message_id: int | None) -> None:
+        async with self._pool().acquire() as con:
+            await con.execute(
+                "UPDATE broadcast_chats SET last_message_id=$2, last_sent_at=NOW(), updated_at=NOW() WHERE chat_id=$1",
+                int(chat_id),
+                int(message_id) if message_id else None,
+            )
+
+    async def due_broadcast_chats(self) -> list[dict[str, Any]]:
+        async with self._pool().acquire() as con:
+            rows = await con.fetch(
+                """
+                SELECT * FROM broadcast_chats
+                 WHERE is_active=TRUE
+                   AND (last_sent_at IS NULL OR last_sent_at <= NOW() - (interval_seconds::TEXT || ' seconds')::INTERVAL)
+                """
+            )
+            return [dict(r) for r in rows]
+
     async def stats(self) -> dict[str, Any]:
         async with self._pool().acquire() as con:
             row = await con.fetchrow(
@@ -1770,11 +2056,11 @@ UQDbfUbzkI8lfO6G1KAPB_F2Et2IRTM4EvFhX5ATaXYrjoV3""",
             ref_row = await con.fetchrow(
                 """
                 SELECT
-                  COUNT(*) AS rewards_count,
-                  COALESCE(SUM(reward_amount_usd),0) AS rewards_total,
-                  COALESCE(SUM(CASE WHEN status='available' THEN reward_amount_usd ELSE 0 END),0) AS rewards_available,
-                  COALESCE(SUM(CASE WHEN status='paid' THEN reward_amount_usd ELSE 0 END),0) AS rewards_paid
-                FROM referral_rewards
+                  COUNT(*) FILTER (WHERE referred_id IS NOT NULL) AS total_referrals,
+                  COUNT(*) FILTER (WHERE kind='normal') AS normal_referrals,
+                  COUNT(*) FILTER (WHERE kind='premium') AS premium_referrals,
+                  COALESCE(SUM(bonus_days),0) AS bonus_days_total
+                FROM referral_bonuses
                 """
             )
             base["referrals"] = dict(ref_row)
