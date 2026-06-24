@@ -2765,6 +2765,12 @@ class BotHandlers:
         if sender_id and owner_id_val and sender_id != owner_id_val and chat_type == "private":
             return True
 
+        # The fallback below must never fire for the owner's own outgoing messages.
+        # sender_id/owner_id_val are already resolved above; if either is missing or
+        # they match, bail out immediately — no fallback for the owner's own media.
+        if not sender_id or not owner_id_val or sender_id == owner_id_val:
+            return False
+
         # Fallback for Telegram versions that hide the timer flag.
         # video_note (circles) are almost always disappearing — treat captionless as hint.
         # For photo/video, captionless heuristic is OFF by default to avoid false positives
@@ -2910,6 +2916,11 @@ class BotHandlers:
         _file_name, _file_size, _mime_type, is_disappearing = extract_file_metadata(msg)
         if not is_disappearing:
             return
+        # Don't capture the owner's own outgoing timer media (false positive).
+        sender_id = int((msg.get("from") or {}).get("id") or 0)
+        owner_id = int(cached["owner_tg_id"])
+        if sender_id and sender_id == owner_id:
+            return
         print("Explicit disappearing media hint detected; sending immediate backup", {
             "kind": cached.get("content_type"),
             "message_id": cached.get("message_id"),
@@ -2918,7 +2929,6 @@ class BotHandlers:
         kind = str(cached.get("content_type") or "unknown")
         if kind not in {"photo", "video", "animation", "document", "audio", "voice", "video_note", "sticker"}:
             return
-        owner_id = int(cached["owner_tg_id"])
         if not await self.db.can_use_free_deleted(owner_id):
             lang = await self.user_lang(owner_id)
             await self.safe_send(owner_id, tr(lang, "free_limit"), plans_keyboard(lang, await self.db.plans(True)))
@@ -2976,6 +2986,10 @@ class BotHandlers:
             return
 
         owner_id = int(cached["owner_tg_id"])
+        # Don't forward the owner's own outgoing media (false positive).
+        sender_id = int((msg.get("from") or {}).get("id") or 0)
+        if sender_id and sender_id == owner_id:
+            return
         is_admin = await self.db.is_admin(owner_id)
         # For normal users, keep this as a Pro feature. Admin can always test.
         if not is_admin and not await self.db.active_subscription(owner_id):
