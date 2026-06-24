@@ -1557,7 +1557,11 @@ class BotHandlers:
                     await self.bot.delete_message(chat_id, message_id)
                 except Exception:
                     pass
-            caption = tr(lang, "connect", app=e(self.settings.app_name), bot_username=e(self.bot_username()))
+            full_caption = tr(lang, "connect", app=e(self.settings.app_name), bot_username=e(self.bot_username()))
+            # The image already shows the title with correct branding.
+            # Strip the first line so wrong APP_NAME env never leaks into the caption.
+            parts = full_caption.split("\n\n", 1)
+            caption = parts[1] if len(parts) > 1 else full_caption
             await self.bot.send_media_bytes(
                 tg_id,
                 "photo",
