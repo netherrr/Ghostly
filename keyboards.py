@@ -61,6 +61,21 @@ def back_menu(lang: str, to: str = "menu") -> dict[str, Any]:
     return inline([[(btn(lang, "back"), to)]])
 
 
+def disappearing_guide_button_text(lang: str) -> str:
+    return {
+        "uk": "👻 Як дивитись зникаючі повідомлення",
+        "ru": "👻 Как смотреть исчезающие сообщения",
+        "en": "👻 How to view disappearing messages",
+    }.get(lang, "👻 How to view disappearing messages")
+
+
+def last_deleted_keyboard(lang: str) -> dict[str, Any]:
+    return inline([
+        [(disappearing_guide_button_text(lang), "disappearing_guide")],
+        [(btn(lang, "back"), "menu")],
+    ])
+
+
 def connect_keyboard(lang: str) -> dict[str, Any]:
     # tg://settings/edit opens the user's profile/settings editor — the closest
     # point to Telegram Business → Chatbots, where the bot is added (verified to
@@ -276,8 +291,10 @@ def admin_settings_keyboard(lang: str) -> dict[str, Any]:
         [("🟢 Ref normal days", "adm_set_setting:ref_normal_days"), ("🔢 Ref normal limit", "adm_set_setting:ref_normal_limit")],
         [("💎 Ref premium days", "adm_set_setting:ref_premium_days")],
         [("₴ UAH/USD rate", "adm_set_setting:uah_rate"), ("🗄 Paid retention days", "adm_set_setting:message_retention_days")],
-        [("🎬 Завантажити відео-інструкцію", "adm_upload_connect_video")],
-        [("🔗 URL відео-інструкції", "adm_set_setting:connect_video_url")],
+        [("🎬 Відео: підключення", "adm_upload_connect_video")],
+        [("🔗 URL відео: підключення", "adm_set_setting:connect_video_url")],
+        [("👻 Відео: зникаючі повідомлення", "adm_upload_guide_video")],
+        [("🔗 URL відео: зникаючі", "adm_set_setting:guide_video_url")],
         [("🧽 Cleanup now", "admin_cleanup")],
         [(btn(lang, "back"), "admin")],
     ])

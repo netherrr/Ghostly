@@ -39,6 +39,7 @@ from keyboards import (
     keyword_delete_keyboard,
     keywords_keyboard,
     lang_keyboard,
+    last_deleted_keyboard,
     main_menu,
     manual_payment_keyboard,
     payment_methods_keyboard,
@@ -338,6 +339,14 @@ TEMPLATE_ALIASES = {
     "proof": "prompt_manual_payment_proof",
     "квитанція": "prompt_manual_payment_proof",
     "квитанция": "prompt_manual_payment_proof",
+    "support": "support",
+    "donate": "support",
+    "підтримка": "support",
+    "поддержка": "support",
+    "guide": "disappearing_guide",
+    "disappearing": "disappearing_guide",
+    "зникаючі": "disappearing_guide",
+    "исчезающие": "disappearing_guide",
 }
 
 DYNAMIC_TEMPLATE_SPECS = {
@@ -434,8 +443,31 @@ def missing_dynamic_vars(base: str, text: str) -> list[str]:
     return [v for v in dynamic_required_vars(base) if "{" + v + "}" not in (text or "")]
 
 
+def html_to_plain(value: Any) -> str:
+    """Turn an HTML-markup fragment into plain text.
+
+    Saved templates are rendered through Telegram *entities* (not parse_mode
+    HTML), so any leftover markup like ``<code>`` would otherwise be shown to
+    the user literally. The dynamic values we inject (keyword lists, hints,
+    deleted previews, …) are built with HTML tags for the default screens, so we
+    strip the tags and unescape entities before substituting them into an
+    entity-rendered template.
+    """
+    text = "" if value is None else str(value)
+    if "<" not in text and "&" not in text:
+        return text
+    text = re.sub(r"<[^>]+>", "", text)
+    return html.unescape(text)
+
+
 def render_dynamic_template(text: str, entities: list[dict[str, Any]] | None, values: dict[str, str]) -> tuple[str, list[dict[str, Any]]]:
-    """Replace {variables} and keep Telegram entity offsets valid."""
+    """Replace {variables} and keep Telegram entity offsets valid.
+
+    Values are sanitized to plain text first: the surrounding template is sent
+    with entities, so HTML tags inside the injected values must not survive or
+    they appear as literal ``<code>`` to the user.
+    """
+    values = {k: html_to_plain(v) for k, v in (values or {}).items()}
     entities = [dict(x) for x in (entities or []) if isinstance(x, dict)]
     source = text or ""
     repls: list[tuple[int, int, int]] = []
@@ -630,6 +662,8 @@ def detect_template_from_target(target: dict[str, Any] | None, lang: str) -> str
         return f"choose_lang_{lang}"
     if any(cb in {"kw_add", "kw_delete_menu"} or cb.startswith("kw_del:") for cb in callbacks):
         return f"keywords_{lang}"
+    if any(cb == "support_custom" or cb.startswith("support_amount:") for cb in callbacks):
+        return f"support_{lang}"
 
     # Static/specific screens first. Privacy and connection instructions can
     # contain words like "Business-підключення", so they must not be mistaken
@@ -644,6 +678,10 @@ def detect_template_from_target(target: dict[str, Any] | None, lang: str) -> str
         return f"menu_{lang}"
     if any(x in low for x in ["обери мову", "выбери язык", "choose language", "choose a language"]):
         return f"choose_lang_{lang}"
+    if any(x in low for x in ["підтримати проект", "поддержать проект", "support the project", "підтримка проекту", "поддержка проекта"]):
+        return f"support_{lang}"
+    if any(x in low for x in ["зникаючі повідомлення", "исчезающие сообщения", "disappearing messages"]):
+        return f"disappearing_guide_{lang}"
 
     # Dynamic screens. Detect them only by clear screen markers, not by generic
     # words like "Business", otherwise privacy/connect screens get misdetected.
@@ -735,6 +773,8 @@ def state_prompt(lang: str, state: str, payload: dict[str, Any]) -> str:
         return "📎 Надішли квитанцію/скрін/фото/відео/файл або текстовий коментар по оплаті. Після цього заявка піде адміну на перевірку."
     if state == "admin_upload_connect_video":
         return "🎬 Надішли відео-інструкцію файлом/відео в цей чат. Я збережу file_id і буду показувати її користувачам у розділі «Як підключити»."
+    if state == "admin_upload_guide_video":
+        return "👻 Надішли відео-інструкцію про зникаючі повідомлення (відео/файл/анімація/фото). Я збережу її і буду показувати користувачам у розділі «Останні видалені» → «Як дивитись зникаючі повідомлення»."
     if state == "admin_edit_message":
         template_key = payload.get("template_key")
         if template_key:
@@ -1136,6 +1176,9 @@ class BotHandlers:
                 return
             if state_name == "admin_upload_connect_video" and is_admin and not text.startswith("/"):
                 await self.handle_admin_upload_connect_video(tg_id, lang, msg, state)
+                return
+            if state_name == "admin_upload_guide_video" and is_admin and not text.startswith("/"):
+                await self.handle_admin_upload_guide_video(tg_id, lang, msg, state)
                 return
             if state_name == "admin_broadcast_template" and is_admin and not text.startswith("/"):
                 await self.handle_broadcast_template_message(tg_id, lang, msg, state)
@@ -1601,7 +1644,12 @@ class BotHandlers:
         )
 
     async def show_support(self, tg_id: int, lang: str, edit: tuple[int, int] | None = None) -> None:
-        await self._send_or_edit(tg_id, self.support_text(lang), support_keyboard(lang), edit)
+        key = f"support_{lang}"
+        tpl = await self.db.get_template(key)
+        if tpl:
+            await self.send_template_screen(tg_id, tpl, support_keyboard(lang), edit, track_key=key)
+            return
+        await self._send_or_edit(tg_id, self.support_text(lang), support_keyboard(lang), edit, track_key=key)
 
     async def validate_support_stars_amount(self, stars: int) -> None:
         # Telegram accepts integer Stars. Keep a sane configurable range so users
@@ -1937,16 +1985,71 @@ class BotHandlers:
                         await self.bot.delete_message(chat_id, message_id)
                     except Exception:
                         pass
-                await self.send_template_content(tg_id, rendered, ents, media, back_menu(lang), track_key=key)
+                await self.send_template_content(tg_id, rendered, ents, media, last_deleted_keyboard(lang), track_key=key)
             else:
-                await self._send_or_edit(tg_id, rendered, back_menu(lang), edit, entities=ents, track_key=key)
+                await self._send_or_edit(tg_id, rendered, last_deleted_keyboard(lang), edit, entities=ents, track_key=key)
             return
 
         if not rows:
-            await self._send_or_edit(tg_id, deleted_list, back_menu(lang), edit, track_key=key)
+            await self._send_or_edit(tg_id, deleted_list, last_deleted_keyboard(lang), edit, track_key=key)
             return
         title = "👻 <b>Last deleted</b>" if lang == "en" else "👻 <b>Останні видалені</b>" if lang == "uk" else "👻 <b>Последние удалённые</b>"
-        await self._send_or_edit(tg_id, f"{title}\n\n{deleted_list}", back_menu(lang), edit, track_key=key)
+        await self._send_or_edit(tg_id, f"{title}\n\n{deleted_list}", last_deleted_keyboard(lang), edit, track_key=key)
+
+    def disappearing_guide_text(self, lang: str) -> str:
+        if lang == "ru":
+            return (
+                "👻 <b>Исчезающие сообщения — как это работает</b>\n\n"
+                "Бот автоматически сохраняет исчезающие фото, видео, кружки и голосовые, "
+                "как только они приходят в подключённый чат. Ничего нажимать не нужно.\n\n"
+                "Как пользоваться:\n"
+                "1️⃣ Подключи бота через <b>Telegram Business → Чат-боты</b>.\n"
+                "2️⃣ Когда собеседник пришлёт исчезающее медиа, бот сразу пришлёт тебе копию сюда.\n"
+                "3️⃣ Копия остаётся у тебя, даже если оригинал исчез или его удалили.\n\n"
+                "💡 Удалённые сообщения смотри в разделе «Последние удалённые»."
+            )
+        if lang == "en":
+            return (
+                "👻 <b>Disappearing messages — how it works</b>\n\n"
+                "The bot automatically saves disappearing photos, videos, video notes and voice "
+                "messages the moment they arrive in a connected chat. You don't have to tap anything.\n\n"
+                "How to use it:\n"
+                "1️⃣ Connect the bot via <b>Telegram Business → Chatbots</b>.\n"
+                "2️⃣ When someone sends disappearing media, the bot instantly forwards a copy to you here.\n"
+                "3️⃣ The copy stays with you even after the original self-destructs or is deleted.\n\n"
+                "💡 See deleted messages in the “Last deleted” section."
+            )
+        return (
+            "👻 <b>Зникаючі повідомлення — як це працює</b>\n\n"
+            "Бот автоматично зберігає зникаючі фото, відео, кружки та голосові одразу, "
+            "щойно вони приходять у підключений чат. Нічого натискати не треба.\n\n"
+            "Як користуватись:\n"
+            "1️⃣ Підключи бота через <b>Telegram Business → Чат-боти</b>.\n"
+            "2️⃣ Коли співрозмовник надішле зникаюче медіа, бот одразу пришле копію тобі сюди.\n"
+            "3️⃣ Копія залишається в тебе, навіть якщо оригінал зник або його видалили.\n\n"
+            "💡 Видалені повідомлення дивись у розділі «Останні видалені»."
+        )
+
+    async def show_disappearing_guide(self, tg_id: int, lang: str, edit: tuple[int, int] | None = None) -> None:
+        video_url = await self.db.get_setting("guide_video_url", "")
+        video_file_id = await self.db.get_setting("guide_video_file_id", "")
+        video_kind = await self.db.get_setting("guide_video_kind", "video")
+        key = f"disappearing_guide_{lang}"
+        tpl = await self.db.get_template(key)
+        if tpl:
+            await self.send_template_screen(tg_id, tpl, back_menu(lang, "last_deleted"), edit, track_key=key)
+        else:
+            text = self.disappearing_guide_text(lang)
+            if video_url:
+                label = "🎬 Video guide" if lang == "en" else "🎬 Видео-инструкция" if lang == "ru" else "🎬 Відео-інструкція"
+                text += f"\n\n{label}: {e(video_url)}"
+            await self._send_or_edit(tg_id, text, back_menu(lang, "last_deleted"), edit, track_key=key)
+        if video_file_id:
+            caption = "🎬 Video guide" if lang == "en" else "🎬 Видео-инструкция" if lang == "ru" else "🎬 Відео-інструкція"
+            try:
+                await self.bot.send_cached_media(tg_id, str(video_kind), str(video_file_id), caption)
+            except Exception as exc:
+                print("Send disappearing guide media error:", repr(exc))
 
 
 
@@ -2204,6 +2307,8 @@ class BotHandlers:
             await self.show_referrals(tg_id, lang, edit)
         elif data == "support":
             await self.show_support(tg_id, lang, edit)
+        elif data == "disappearing_guide":
+            await self.show_disappearing_guide(tg_id, lang, edit)
         elif data == "support_custom":
             await self.db.set_state(tg_id, "support_stars_amount", {})
             await self._send_or_edit(tg_id, state_prompt(lang, "support_stars_amount", {}), back_menu(lang, "support"), edit)
@@ -2251,7 +2356,7 @@ class BotHandlers:
             await self.admin_approve_callback(tg_id, lang, int(data.split(":", 1)[1]), approved=False)
         elif data == "admin":
             await self.show_admin(tg_id, lang, edit)
-        elif data.startswith("admin_") or data.startswith("adm_"):
+        elif data.startswith("admin_") or data.startswith("adm_") or data.startswith("bc_"):
             await self.handle_admin_callback(tg_id, lang, data, edit)
 
     async def callback_buy(self, tg_id: int, lang: str, plan_id: int, edit: tuple[int, int] | None) -> None:
@@ -2531,6 +2636,16 @@ class BotHandlers:
         await self.db.clear_state(tg_id)
         await self.bot.send_message(tg_id, f"✅ Відео/медіа інструкцію збережено. Тип: <code>{e(proof['kind'])}</code>", admin_settings_keyboard(lang))
 
+    async def handle_admin_upload_guide_video(self, tg_id: int, lang: str, msg: dict[str, Any], state_row: dict[str, Any]) -> None:
+        proof = extract_message_attachment(msg)
+        if not proof.get("file_id") or proof.get("kind") not in {"video", "document", "animation", "photo"}:
+            await self.bot.send_message(tg_id, "❌ Надішли саме відео/файл/анімацію або фото з інструкцією.", cancel_keyboard(lang, "admin_settings"))
+            return
+        await self.db.set_setting("guide_video_file_id", proof["file_id"])
+        await self.db.set_setting("guide_video_kind", proof["kind"])
+        await self.db.clear_state(tg_id)
+        await self.bot.send_message(tg_id, f"✅ Відео-інструкцію для зникаючих повідомлень збережено. Тип: <code>{e(proof['kind'])}</code>", admin_settings_keyboard(lang))
+
     async def admin_approve_callback(self, admin_id: int, lang: str, payment_id: int, approved: bool) -> None:
         if not await self.db.is_admin(admin_id):
             await self.bot.send_message(admin_id, tr(lang, "not_admin"))
@@ -2647,6 +2762,9 @@ class BotHandlers:
         elif data == "adm_upload_connect_video":
             await self.db.set_state(tg_id, "admin_upload_connect_video", {})
             await self._send_or_edit(tg_id, state_prompt(lang, "admin_upload_connect_video", {}), cancel_keyboard(lang, "admin_settings"), edit)
+        elif data == "adm_upload_guide_video":
+            await self.db.set_state(tg_id, "admin_upload_guide_video", {})
+            await self._send_or_edit(tg_id, state_prompt(lang, "admin_upload_guide_video", {}), cancel_keyboard(lang, "admin_settings"), edit)
         elif data == "admin_cleanup":
             deleted = await self.db.cleanup_old_messages()
             await self._send_or_edit(tg_id, f"🧹 Cleanup done. Deleted rows: <b>{deleted}</b>", admin_settings_keyboard(lang), edit)
