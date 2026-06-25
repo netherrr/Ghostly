@@ -452,6 +452,11 @@ class Database:
                 "connect_video_url": "",
                 "connect_video_file_id": "",
                 "connect_video_kind": "video",
+                # Disappearing-messages guide (how to use the self-destruct
+                # media viewer). Mirrors the connect-video infrastructure.
+                "guide_video_url": "",
+                "guide_video_file_id": "",
+                "guide_video_kind": "video",
                 "referral_percent": 30,
                 "uah_rate": 44,
                 # New referral model (days-based bonuses).
@@ -964,6 +969,93 @@ UQDbfUbzkI8lfO6G1KAPB_F2Et2IRTM4EvFhX5ATaXYrjoV3""",
                 await con.execute(
                     """
                     INSERT INTO settings(key, value) VALUES('requisites_plain_v3', 'true'::jsonb)
+                    ON CONFLICT(key) DO UPDATE SET value='true'::jsonb, updated_at=NOW()
+                    """
+                )
+
+            # One-time payment-method layout refresh (owner request): clean,
+            # emoji-prefixed buttons with timing hints, a single combined
+            # TRC20/BEP20 option, and no separate RU card / Binance buttons.
+            methods_layout = await con.fetchval("SELECT value FROM settings WHERE key='payment_methods_layout_v1'")
+            if not methods_layout:
+                # Hide methods that should not appear in the new layout.
+                await con.execute(
+                    "UPDATE payment_methods SET is_active=FALSE, updated_at=NOW() WHERE code IN ('usdt_bep20','binance_id','ru_card')"
+                )
+                # Re-title + re-order the visible methods to match the desired UI.
+                layout = [
+                    ("ua_card", "🇺🇦 Карта (UAH) (1–30 хв)", "🇺🇦 Карта (UAH) (1–30 мин)", "🇺🇦 Card (UAH) (1–30 min)", 10),
+                    ("cryptobot", "🪙 CryptoBot (автоматично)", "🪙 CryptoBot (автоматически)", "🪙 CryptoBot (automatic)", 20),
+                    ("ton", "🔵 TON (1–30 хв)", "🔵 TON (1–30 мин)", "🔵 TON (1–30 min)", 30),
+                    ("usdt_trc20", "🟡 USDT TRC20 / BEP20 (1–30 хв)", "🟡 USDT TRC20 / BEP20 (1–30 мин)", "🟡 USDT TRC20 / BEP20 (1–30 min)", 40),
+                    ("telegram_stars", "⭐ Telegram Stars", "⭐ Telegram Stars", "⭐ Telegram Stars", 50),
+                ]
+                for code, t_uk, t_ru, t_en, pos in layout:
+                    await con.execute(
+                        """
+                        UPDATE payment_methods
+                        SET title_uk=$2, title_ru=$3, title_en=$4, position=$5, is_active=TRUE, updated_at=NOW()
+                        WHERE code=$1
+                        """,
+                        code, t_uk, t_ru, t_en, pos,
+                    )
+                # The combined USDT button must expose both networks.
+                await con.execute(
+                    """
+                    UPDATE payment_methods
+                    SET instructions_uk=$2, instructions_ru=$3, instructions_en=$4, details=$5::jsonb, updated_at=NOW()
+                    WHERE code='usdt_trc20'
+                    """,
+                    "usdt_trc20",
+                    """🪙 <b>USDT — ручна оплата</b>
+
+Оплати суму, яку бот показав вище. Обери будь-яку мережу:
+
+Мережа <b>TRC20</b>:
+<code>TW2XKnkY6MdgsJxXZFXqFoucWkgxEqr7Ei</code>
+
+Мережа <b>BEP20</b>:
+<code>0x2d523071538cd8a417858d78775e966c9171ffc8</code>
+
+Після оплати натисни «Я оплатив» і надішли скріншот, квитанцію або hash/TxID.
+
+Важливо: перевір мережу перед оплатою. Якщо відправити USDT не в ту мережу, платіж може бути втрачений.""",
+                    """🪙 <b>USDT — ручная оплата</b>
+
+Оплати сумму, которую бот показал выше. Выбери любую сеть:
+
+Сеть <b>TRC20</b>:
+<code>TW2XKnkY6MdgsJxXZFXqFoucWkgxEqr7Ei</code>
+
+Сеть <b>BEP20</b>:
+<code>0x2d523071538cd8a417858d78775e966c9171ffc8</code>
+
+После оплаты нажми «Я оплатил» и отправь скриншот, квитанцию или hash/TxID.
+
+Важно: проверь сеть перед оплатой. Если отправить USDT не в ту сеть, платёж может быть потерян.""",
+                    """🪙 <b>USDT — manual payment</b>
+
+Send the amount shown above by the bot. Pick any network:
+
+<b>TRC20</b> network:
+<code>TW2XKnkY6MdgsJxXZFXqFoucWkgxEqr7Ei</code>
+
+<b>BEP20</b> network:
+<code>0x2d523071538cd8a417858d78775e966c9171ffc8</code>
+
+After payment, press “I paid” and send a screenshot, receipt, or transaction hash/TxID.
+
+Important: check the network before sending. If USDT is sent through the wrong network, the payment may be lost.""",
+                    json.dumps({
+                        "networks": {
+                            "TRC20": "TW2XKnkY6MdgsJxXZFXqFoucWkgxEqr7Ei",
+                            "BEP20": "0x2d523071538cd8a417858d78775e966c9171ffc8",
+                        }
+                    }),
+                )
+                await con.execute(
+                    """
+                    INSERT INTO settings(key, value) VALUES('payment_methods_layout_v1', 'true'::jsonb)
                     ON CONFLICT(key) DO UPDATE SET value='true'::jsonb, updated_at=NOW()
                     """
                 )
