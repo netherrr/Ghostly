@@ -69,9 +69,24 @@ def disappearing_guide_button_text(lang: str) -> str:
     }.get(lang, "👻 How to view disappearing messages")
 
 
-def last_deleted_keyboard(lang: str) -> dict[str, Any]:
+def track_own_button_text(lang: str, track_own: bool) -> str:
+    if track_own:
+        return {
+            "uk": "🙈 Не показувати мої повідомлення",
+            "ru": "🙈 Не показывать мои сообщения",
+            "en": "🙈 Hide my own messages",
+        }.get(lang, "🙈 Hide my own messages")
+    return {
+        "uk": "👁 Показувати й мої повідомлення",
+        "ru": "👁 Показывать и мои сообщения",
+        "en": "👁 Show my own messages too",
+    }.get(lang, "👁 Show my own messages too")
+
+
+def last_deleted_keyboard(lang: str, track_own: bool = True) -> dict[str, Any]:
     return inline([
         [(disappearing_guide_button_text(lang), "disappearing_guide")],
+        [(track_own_button_text(lang, track_own), "toggle_own")],
         [(btn(lang, "back"), "menu")],
     ])
 
