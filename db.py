@@ -1004,7 +1004,7 @@ UQDbfUbzkI8lfO6G1KAPB_F2Et2IRTM4EvFhX5ATaXYrjoV3""",
                     """
                     UPDATE payment_methods
                     SET instructions_uk=$2, instructions_ru=$3, instructions_en=$4, details=$5::jsonb, updated_at=NOW()
-                    WHERE code='usdt_trc20'
+                    WHERE code=$1
                     """,
                     "usdt_trc20",
                     """🪙 <b>USDT — ручна оплата</b>
