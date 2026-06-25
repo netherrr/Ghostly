@@ -62,10 +62,11 @@ def back_menu(lang: str, to: str = "menu") -> dict[str, Any]:
 
 
 def connect_keyboard(lang: str) -> dict[str, Any]:
-    # tg://settings opens the user's Telegram Settings — the closest point to
-    # Telegram Business → Chatbots, which is where the bot is added. There is no
-    # public deep link straight to the Chatbots screen, so Settings is the best
-    # available shortcut and the instruction text guides the last two taps.
+    # tg://settings/edit opens the user's profile/settings editor — the closest
+    # point to Telegram Business → Chatbots, where the bot is added (verified to
+    # work in the Telegram iOS app). There is no public deep link straight to the
+    # Chatbots screen, so this is the best available shortcut; the instruction
+    # text guides the last taps.
     open_label = {
         "uk": "🔌 Підключити",
         "ru": "🔌 Подключить",
@@ -73,7 +74,7 @@ def connect_keyboard(lang: str) -> dict[str, Any]:
     }.get(lang, "🔌 Connect")
     return {
         "inline_keyboard": [
-            [{"text": open_label, "url": "tg://settings"}],
+            [{"text": open_label, "url": "tg://settings/edit"}],
             [{"text": btn(lang, "back"), "callback_data": "menu"}],
         ]
     }
