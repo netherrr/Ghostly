@@ -1696,14 +1696,18 @@ class BotHandlers:
             # Strip the first line so wrong APP_NAME env never leaks into the caption.
             parts = full_caption.split("\n\n", 1)
             caption = parts[1] if len(parts) > 1 else full_caption
-            result = await self.bot.send_media_bytes(
-                tg_id,
-                "photo",
-                asset_path.name,
-                asset_path.read_bytes(),
-                caption[:1024],
-                connect_keyboard(lang),
-            )
+            content = asset_path.read_bytes()
+            try:
+                result = await self.bot.send_media_bytes(
+                    tg_id, "photo", asset_path.name, content, caption[:1024], connect_keyboard(lang),
+                )
+            except Exception as kb_exc:
+                # Some clients/Bot API builds reject the tg:// deep-link button.
+                # Never let that break the connect screen — fall back to Back only.
+                print("connect_keyboard send failed, retrying without deep-link:", repr(kb_exc), flush=True)
+                result = await self.bot.send_media_bytes(
+                    tg_id, "photo", asset_path.name, content, caption[:1024], back_menu(lang),
+                )
             await self.track_sent(result, tg_id, f"connect_{lang}")
             return True
         except Exception as exc:
@@ -1725,7 +1729,11 @@ class BotHandlers:
                 tpl = dict(tpl)
                 tpl["text"] = f"{tpl.get('text') or ''}\n\n{label}: {e(video_url)}"
                 tpl["entities"] = []
-            await self.send_template_screen(tg_id, tpl, connect_keyboard(lang), edit, track_key=key)
+            try:
+                await self.send_template_screen(tg_id, tpl, connect_keyboard(lang), edit, track_key=key)
+            except Exception as exc:
+                print("connect template send failed, retrying without deep-link:", repr(exc), flush=True)
+                await self.send_template_screen(tg_id, tpl, back_menu(lang), edit, track_key=key)
         else:
             if await self.send_connect_card(tg_id, lang, edit):
                 return
@@ -1735,7 +1743,11 @@ class BotHandlers:
                 label = "🎬 Video guide" if lang == "en" else "🎬 Видео-инструкция" if lang == "ru" else "🎬 Відео-інструкція"
                 text += f"\n\n{label}: {e(video_url)}"
                 entities = None
-            await self._send_or_edit(tg_id, text, connect_keyboard(lang), edit, entities=entities, track_key=key)
+            try:
+                await self._send_or_edit(tg_id, text, connect_keyboard(lang), edit, entities=entities, track_key=key)
+            except Exception as exc:
+                print("connect text send failed, retrying without deep-link:", repr(exc), flush=True)
+                await self._send_or_edit(tg_id, text, back_menu(lang), edit, entities=entities, track_key=key)
         if video_file_id:
             caption = "🎬 Video guide" if lang == "en" else "🎬 Видео-инструкция" if lang == "ru" else "🎬 Відео-інструкція"
             try:

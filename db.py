@@ -354,12 +354,12 @@ class Database:
                 INSERT INTO plans(code, name_uk, name_ru, name_en, features_uk, features_ru, features_en, price_usd, price_uah, price_stars, duration_days, position, is_active)
                 VALUES
                 ('sub_1d',   '1 день',     '1 день',     '1 day',     $1, $2, $3, 0.15, NULL, 20,  1,   10, TRUE),
-                ('sub_3d',   '3 дні',      '3 дня',      '3 days',    $1, $2, $3, 0.25, NULL, 35,  3,   20, TRUE),
-                ('sub_7d',   '7 днів',     '7 дней',     '7 days',    $1, $2, $3, 0.40, NULL, 55,  7,   30, TRUE),
-                ('sub_30d',  '1 місяць',   '1 месяц',    '1 month',   $1, $2, $3, 0.99, NULL, 135, 30,  40, TRUE),
-                ('sub_90d',  '3 місяці',   '3 месяца',   '3 months',  $1, $2, $3, 1.99, NULL, 265, 90,  50, TRUE),
-                ('sub_180d', '6 місяців',  '6 месяцев',  '6 months',  $1, $2, $3, 2.99, NULL, 400, 180, 60, TRUE),
-                ('sub_365d', '12 місяців', '12 месяцев', '12 months', $1, $2, $3, 3.99, NULL, 530, 365, 70, TRUE)
+                ('sub_3d',   '3 дні',      '3 дня',      '3 days',    $1, $2, $3, 0.25, NULL, 30,  3,   20, TRUE),
+                ('sub_7d',   '7 днів',     '7 дней',     '7 days',    $1, $2, $3, 0.40, NULL, 50,  7,   30, TRUE),
+                ('sub_30d',  '1 місяць',   '1 месяц',    '1 month',   $1, $2, $3, 0.99, NULL, 120, 30,  40, TRUE),
+                ('sub_90d',  '3 місяці',   '3 месяца',   '3 months',  $1, $2, $3, 1.99, NULL, 240, 90,  50, TRUE),
+                ('sub_180d', '6 місяців',  '6 месяцев',  '6 months',  $1, $2, $3, 2.99, NULL, 360, 180, 60, TRUE),
+                ('sub_365d', '12 місяців', '12 месяцев', '12 months', $1, $2, $3, 3.99, NULL, 480, 365, 70, TRUE)
                 ON CONFLICT(code) DO UPDATE SET
                     name_uk=EXCLUDED.name_uk,
                     name_ru=EXCLUDED.name_ru,
@@ -395,24 +395,25 @@ class Database:
                     "INSERT INTO settings(key, value) VALUES('pricing_model_2026_v1', 'true'::jsonb) ON CONFLICT(key) DO UPDATE SET value='true'::jsonb, updated_at=NOW()"
                 )
 
-            # Stars repricing rounded to nice numbers. Forces the new Stars values
-            # once on existing DBs that still hold earlier ones.
-            stars_applied = await con.fetchval("SELECT value FROM settings WHERE key='stars_pricing_2026_v3'")
+            # Stars repricing at 120⭐ per $1, rounded UP to the nearest 5 (so a
+            # Stars purchase is never below the USD rate). Forces the values once
+            # on existing DBs that still hold earlier ones.
+            stars_applied = await con.fetchval("SELECT value FROM settings WHERE key='stars_pricing_2026_v4'")
             if not stars_applied:
                 await con.execute(
                     """
                     UPDATE plans SET
                         price_stars = CASE code
-                            WHEN 'sub_1d' THEN 20  WHEN 'sub_3d' THEN 35
-                            WHEN 'sub_7d' THEN 55  WHEN 'sub_30d' THEN 135
-                            WHEN 'sub_90d' THEN 265 WHEN 'sub_180d' THEN 400
-                            WHEN 'sub_365d' THEN 530 ELSE price_stars END,
+                            WHEN 'sub_1d' THEN 20  WHEN 'sub_3d' THEN 30
+                            WHEN 'sub_7d' THEN 50  WHEN 'sub_30d' THEN 120
+                            WHEN 'sub_90d' THEN 240 WHEN 'sub_180d' THEN 360
+                            WHEN 'sub_365d' THEN 480 ELSE price_stars END,
                         updated_at=NOW()
                      WHERE code IN ('sub_1d','sub_3d','sub_7d','sub_30d','sub_90d','sub_180d','sub_365d')
                     """
                 )
                 await con.execute(
-                    "INSERT INTO settings(key, value) VALUES('stars_pricing_2026_v3', 'true'::jsonb) ON CONFLICT(key) DO UPDATE SET value='true'::jsonb, updated_at=NOW()"
+                    "INSERT INTO settings(key, value) VALUES('stars_pricing_2026_v4', 'true'::jsonb) ON CONFLICT(key) DO UPDATE SET value='true'::jsonb, updated_at=NOW()"
                 )
 
             await con.execute(
