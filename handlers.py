@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import html
 import io
 import json
@@ -46,6 +47,7 @@ from keyboards import (
     plans_keyboard,
     referral_keyboard,
     support_keyboard,
+    user_broadcast_menu_keyboard,
 )
 
 
@@ -799,6 +801,12 @@ def state_prompt(lang: str, state: str, payload: dict[str, Any]) -> str:
         )
     if state == "admin_broadcast_interval":
         return "⏱ Надішли інтервал розсилки у хвилинах. Приклад: <code>15</code>"
+    if state == "admin_userbroadcast_template":
+        return (
+            "📨 <b>Розсилка в боті</b>\n\n"
+            "Перешли або надішли боту повідомлення, яке треба розіслати всім користувачам бота: текст, фото, відео, GIF, документ, аудіо, голос, відеоповідомлення, стікер або альбом.\n\n"
+            "Бот скопіює його кожному в особисті в оригінальному вигляді. Для альбому перешли всі частини поспіль."
+        )
     if state == "admin_ref_bonus":
         return "✏️ Надішли <code>user_id днів</code>. Приклад: <code>123456789 5</code>"
     return "Надішли значення або натисни Скасувати."
@@ -1182,6 +1190,9 @@ class BotHandlers:
                 return
             if state_name == "admin_broadcast_template" and is_admin and not text.startswith("/"):
                 await self.handle_broadcast_template_message(tg_id, lang, msg, state)
+                return
+            if state_name == "admin_userbroadcast_template" and is_admin and not text.startswith("/"):
+                await self.handle_user_broadcast_template_message(tg_id, lang, msg, state)
                 return
             if state_name == "admin_broadcast_add" and is_admin and not text.startswith("/"):
                 # Forwarded message from the target chat (may carry no text).
@@ -2280,6 +2291,10 @@ class BotHandlers:
                 await self.show_keywords(tg_id, lang, edit)
             elif target == "admin_settings":
                 await self.show_admin_settings(tg_id, lang, edit)
+            elif target == "admin_broadcast":
+                await self.show_broadcasts(tg_id, lang, edit)
+            elif target == "admin_userbroadcast":
+                await self.show_user_broadcast(tg_id, lang, edit)
             elif target.startswith("admin_plan:"):
                 await self.show_admin_plan(tg_id, lang, int(target.split(":", 1)[1]), edit)
             elif target.startswith("admin_method:"):
@@ -2364,7 +2379,7 @@ class BotHandlers:
             await self.admin_approve_callback(tg_id, lang, int(data.split(":", 1)[1]), approved=False)
         elif data == "admin":
             await self.show_admin(tg_id, lang, edit)
-        elif data.startswith("admin_") or data.startswith("adm_") or data.startswith("bc_"):
+        elif data.startswith("admin_") or data.startswith("adm_") or data.startswith("bc_") or data.startswith("ub_"):
             await self.handle_admin_callback(tg_id, lang, data, edit)
 
     async def callback_buy(self, tg_id: int, lang: str, plan_id: int, edit: tuple[int, int] | None) -> None:
@@ -2717,6 +2732,14 @@ class BotHandlers:
         elif data == "bc_send_now":
             sent = await self.broadcast_send_now()
             await self._send_or_edit(tg_id, f"🚀 Розіслано в <b>{sent}</b> чат(ів).", back_menu(lang, "admin_broadcast"), edit)
+        elif data == "admin_userbroadcast":
+            await self.db.clear_state(tg_id)
+            await self.show_user_broadcast(tg_id, lang, edit)
+        elif data == "ub_template":
+            await self.db.set_state(tg_id, "admin_userbroadcast_template", {})
+            await self._send_or_edit(tg_id, state_prompt(lang, "admin_userbroadcast_template", {}), cancel_keyboard(lang, "admin_userbroadcast"), edit)
+        elif data == "ub_send_now":
+            await self.user_broadcast_send_now(tg_id, lang, edit)
         elif data.startswith("admin_payment:"):
             await self.show_admin_payment(tg_id, lang, int(data.split(":", 1)[1]), edit)
         elif data.startswith("admin_proof:"):
@@ -3153,6 +3176,94 @@ class BotHandlers:
             if await self.broadcast_to_chat(chat, template):
                 sent += 1
         return sent
+
+    # ===================== In-bot broadcast (to all users) =====================
+
+    async def show_user_broadcast(self, tg_id: int, lang: str, edit: tuple[int, int] | None = None) -> None:
+        tpl = await self.db.get_setting("user_broadcast_template", None)
+        has_tpl = isinstance(tpl, dict) and bool(tpl.get("message_ids"))
+        total = await self.db.count_users()
+        lines = [
+            "📨 <b>Розсилка в боті</b>",
+            "",
+            f"📝 Повідомлення: <b>{'✅ збережено' if has_tpl else '— не задано'}</b>",
+            f"👤 Користувачів у базі: <b>{total}</b>",
+            "",
+            "Задай повідомлення і натисни «Розіслати всім» — бот надішле його кожному в особисті.",
+        ]
+        await self._send_or_edit(tg_id, "\n".join(lines), user_broadcast_menu_keyboard(lang, has_tpl), edit)
+
+    async def handle_user_broadcast_template_message(self, tg_id: int, lang: str, msg: dict[str, Any], state_row: dict[str, Any]) -> None:
+        mid = msg.get("message_id")
+        if not mid:
+            return
+        mgid = msg.get("media_group_id")
+        now_ts = int(datetime.now(timezone.utc).timestamp())
+        existing = await self.db.get_setting("user_broadcast_template", None)
+        # Album parts arrive as separate updates with the same media_group_id;
+        # collect them into one template within a short window.
+        if (
+            mgid
+            and isinstance(existing, dict)
+            and existing.get("media_group_id") == str(mgid)
+            and existing.get("chat_id") == tg_id
+            and now_ts - int(existing.get("ts") or 0) < 20
+        ):
+            ids = list(existing.get("message_ids") or [])
+            if int(mid) not in ids:
+                ids.append(int(mid))
+            await self.db.set_setting("user_broadcast_template", {"chat_id": tg_id, "message_ids": ids, "media_group_id": str(mgid), "ts": now_ts})
+            return  # stay silent for extra album parts
+        tpl = {"chat_id": tg_id, "message_ids": [int(mid)], "media_group_id": str(mgid) if mgid else None, "ts": now_ts}
+        await self.db.set_setting("user_broadcast_template", tpl)
+        # Keep the state so extra album parts (separate updates with the same
+        # media_group_id) are still collected. State is cleared when the admin
+        # opens the menu or sends. The send/back buttons handle navigation.
+        done_kb = inline([[("🚀 Розіслати всім", "ub_send_now")], [("⬅️ Назад", "admin_userbroadcast")]])
+        await self.bot.send_message(
+            tg_id,
+            "✅ <b>Повідомлення збережено.</b>\nВоно буде надіслано всім користувачам бота.\n\n"
+            "Для альбому перешли решту частин зараз. Коли готово — натисни «Розіслати всім».",
+            done_kb,
+        )
+
+    async def user_broadcast_send_now(self, tg_id: int, lang: str, edit: tuple[int, int] | None = None) -> None:
+        await self.db.clear_state(tg_id)
+        template = await self.db.get_setting("user_broadcast_template", None)
+        if not isinstance(template, dict) or not template.get("message_ids"):
+            await self._send_or_edit(tg_id, "⚠️ Спочатку задай повідомлення для розсилки.", user_broadcast_menu_keyboard(lang, False), edit)
+            return
+        # Run the delivery loop in the background so the webhook callback returns
+        # immediately and Telegram does not retry/timeout on large user bases.
+        await self._send_or_edit(tg_id, "🚀 Розсилаю… Звіт надішлю, коли завершу.", back_menu(lang, "admin_userbroadcast"), edit)
+        asyncio.create_task(self._run_user_broadcast(tg_id, lang, template))
+
+    async def _run_user_broadcast(self, admin_id: int, lang: str, template: dict[str, Any]) -> None:
+        from_chat = int(template.get("chat_id"))
+        message_ids = [int(x) for x in (template.get("message_ids") or [])]
+        sent = 0
+        failed = 0
+        try:
+            for uid in await self.db.all_user_ids():
+                try:
+                    await self.bot.copy_messages(uid, from_chat, message_ids)
+                    sent += 1
+                except Exception as exc:
+                    failed += 1
+                    print("User broadcast send failed:", uid, repr(exc), flush=True)
+                # Telegram allows ~30 messages/sec to different users. Throttle
+                # gently to stay under the limit and avoid 429s on large bases.
+                await asyncio.sleep(0.05)
+        except Exception as exc:
+            print("User broadcast loop crashed:", repr(exc), flush=True)
+        try:
+            await self.bot.send_message(
+                admin_id,
+                f"✅ <b>Розсилку завершено.</b>\n\nДоставлено: <b>{sent}</b>\nНе вдалося (блок/видалили бота): <b>{failed}</b>",
+                back_menu(lang, "admin_userbroadcast"),
+            )
+        except Exception as exc:
+            print("User broadcast report failed:", repr(exc), flush=True)
 
     async def handle_my_chat_member(self, upd: dict[str, Any]) -> None:
         """Auto-register/unregister broadcast chats as the bot's admin status changes."""

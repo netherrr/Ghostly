@@ -214,7 +214,17 @@ def admin_menu(lang: str) -> dict[str, Any]:
         [(btn(lang, "admin_grant"), "admin_grant"), (btn(lang, "admin_revoke"), "admin_revoke")],
         [(btn(lang, "admin_settings"), "admin_settings"), (btn(lang, "admin_users"), "admin_users")],
         [(btn(lang, "admin_referrals"), "admin_referrals"), (btn(lang, "admin_broadcast"), "admin_broadcast")],
+        [("📨 Розсилка в боті", "admin_userbroadcast")],
         [(btn(lang, "back"), "menu")],
+    ])
+
+
+def user_broadcast_menu_keyboard(lang: str, has_template: bool) -> dict[str, Any]:
+    tpl_label = "📝 Повідомлення ✅" if has_template else "📝 Задати повідомлення"
+    return inline([
+        [(tpl_label, "ub_template")],
+        [("🚀 Розіслати всім", "ub_send_now")],
+        [(btn(lang, "back"), "admin")],
     ])
 
 
