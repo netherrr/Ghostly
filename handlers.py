@@ -1797,14 +1797,6 @@ class BotHandlers:
     async def show_plans(self, tg_id: int, lang: str, edit: tuple[int, int] | None = None) -> None:
         try:
             plans = await self.db.plans(active_only=True)
-            user = await self.db.get_user(tg_id)
-            access_line = self.access_status_line(user, lang)
-            # Price is shown only on the buttons (with Stars), so the text block
-            # describes the benefit without duplicating the price.
-            plan_lines = []
-            for p in plans:
-                feats = plan_features(p, lang)
-                plan_lines.append(f"💎 <b>{e(plan_name(p, lang))}</b>\n{feats}" if feats else f"💎 <b>{e(plan_name(p, lang))}</b>")
             if not plans:
                 no_plans = (
                     "🔒 Активних тарифів поки немає. Поверніться пізніше."
@@ -1815,10 +1807,14 @@ class BotHandlers:
                 )
                 await self._send_or_edit(tg_id, no_plans, back_menu(lang), edit)
                 return
+            user = await self.db.get_user(tg_id)
+            access_line = self.access_status_line(user, lang)
+            # The full plan list (name, price, Stars) lives on the buttons, so the
+            # text stays minimal: a short title and the user's current access.
             key = f"plans_{lang}"
             tpl = await self.db.get_template(key)
             if tpl:
-                values = {"plans_list": access_line + "\n\n" + "\n\n".join(plan_lines)}
+                values = {"plans_list": access_line}
                 rendered, ents = render_dynamic_template(str(tpl.get("text") or ""), tpl.get("entities") or [], values)
                 media = tpl.get("media")
                 if media:
@@ -1832,8 +1828,8 @@ class BotHandlers:
                 else:
                     await self._send_or_edit(tg_id, rendered, plans_keyboard(lang, plans), edit, entities=ents, track_key=key)
                 return
-            lines = [tr(lang, "plans_title", app=e(self.settings.app_name), bot_username=e(self.bot_username())), access_line, *plan_lines]
-            await self._send_or_edit(tg_id, "\n\n".join(lines), plans_keyboard(lang, plans), edit, track_key=f"plans_{lang}")
+            text = f"{tr(lang, 'plans_title', app=e(self.settings.app_name), bot_username=e(self.bot_username()))}\n\n{access_line}"
+            await self._send_or_edit(tg_id, text, plans_keyboard(lang, plans), edit, track_key=f"plans_{lang}")
         except Exception as exc:
             print("show_plans error:", repr(exc), flush=True)
             await self.safe_send(tg_id, "❌ Не вдалося завантажити тарифи. Спробуй /plans ще раз або напиши підтримці.")

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 SUPPORTED_LANGS = {'uk', 'ru', 'en'}
 
-TEXTS: dict[str, dict[str, str]] = {'uk': {'start': '🕵️ <b>VERTUU SPY BOT</b>\n\nЗберігаю видалені повідомлення, правки та зникаючі медіа у твоїх чатах.\n\n<b>Як почати:</b>\n1️⃣ Натисни «🔌 Підключити» нижче\n2️⃣ Профіль Telegram → Чат-боти → додай <b>@{bot_username}</b>\n3️⃣ Готово — я стежу за чатами\n\n👇 Почни з кнопки «🔌 Підключити».',
+TEXTS: dict[str, dict[str, str]] = {'uk': {'start': '🕵️ <b>VERTUU SPY BOT</b>\n\nЗберігаю видалені повідомлення, правки та зникаючі медіа у твоїх чатах.\n\n👇 Натисни «🔌 Підключити», щоб налаштувати за 30 секунд.',
         'choose_lang': '🌐 Обери мову:',
         'menu': '🏠 <b>Головне меню</b>\n\nОбери розділ:',
         'status': '🛡 <b>Статус захисту</b>\n\n💎 <b>Доступ:</b> {sub_status}\n🔌 <b>Автоматизація чатів:</b> {business_status}\n💬 <b>Збережено нових повідомлень:</b> {saved}\n👻 <b>Видалених знайдено:</b> {deleted}\n\n{hint}',
@@ -12,8 +12,8 @@ TEXTS: dict[str, dict[str, str]] = {'uk': {'start': '🕵️ <b>VERTUU SPY BOT</
         'business_off': '❌ не підключено',
         'status_hint_connect': 'Щоб я почав працювати, додай мене в Telegram → профіль → Змінити → Автоматизація чатів. Після цього я бачитиму тільки нові повідомлення в дозволених чатах.',
         'status_hint_ok': '✅ Захист увімкнений. Для тесту попроси когось написати повідомлення й видалити його — я покажу копію тут.',
-        'connect': '🔌 <b>Підключення за 3 кроки</b>\n\n1. Профіль Telegram → <b>Змінити</b>\n2. <b>Автоматизація чатів</b>\n3. Додай <b>@{bot_username}</b> і обери чати\n\n✅ Без кодів і паролів\n✅ Онови Telegram до останньої версії\n⚠️ Старі видалені повідомлення (до підключення) недоступні',
-        'plans_title': '💎 <b>Тарифи VERTUU SPY BOT</b>\n\nОбери план підписки:',
+        'connect': '🔌 <b>Підключення за 3 кроки</b>\n\n1️⃣ Telegram → <b>Налаштування</b> → <b>Telegram Business</b>\n2️⃣ Відкрий <b>Чат-боти</b>\n3️⃣ Встав <code>@{bot_username}</code> і обери чати\n\n✅ Без кодів, паролів і session string\n💡 Натисни на <code>@{bot_username}</code>, щоб скопіювати',
+        'plans_title': '💎 <b>Тарифи VERTUU SPY BOT</b>\n\nОбери відповідний тариф:',
         'plan_line': '<b>{name}</b> — ${price} / {days}\n{features}',
         'choose_payment': '💳 <b>Оплата тарифу</b>\n'
                           '\n'
@@ -97,7 +97,7 @@ TEXTS: dict[str, dict[str, str]] = {'uk': {'start': '🕵️ <b>VERTUU SPY BOT</
         'ref_earned_premium': '💎 <b>+{days} дн. Premium</b> за Premium-реферала.',
         'ref_limit_reached': '🤝 Новий реферал зараховано. Ліміт бонусних днів за звичайних рефералів вичерпано.',
         'unknown_command': 'Не зрозумів команду. Натисни меню нижче.'},
- 'ru': {'start': '🕵️ <b>VERTUU SPY BOT</b>\n\nСохраняю удалённые сообщения, правки и исчезающие медиа в твоих чатах.\n\n<b>Как начать:</b>\n1️⃣ Нажми «🔌 Подключить» ниже\n2️⃣ Профиль Telegram → Чат-боты → добавь <b>@{bot_username}</b>\n3️⃣ Готово — я слежу за чатами\n\n👇 Начни с кнопки «🔌 Подключить».',
+ 'ru': {'start': '🕵️ <b>VERTUU SPY BOT</b>\n\nСохраняю удалённые сообщения, правки и исчезающие медиа в твоих чатах.\n\n👇 Нажми «🔌 Подключить» и настрой за 30 секунд.',
         'choose_lang': '🌐 Выбери язык:',
         'menu': '🏠 <b>Главное меню</b>\n\nВыбери раздел:',
         'status': '🛡 <b>Статус защиты</b>\n\n💎 <b>Доступ:</b> {sub_status}\n🔌 <b>Автоматизация чатов:</b> {business_status}\n💬 <b>Сохранено новых сообщений:</b> {saved}\n👻 <b>Удалённых найдено:</b> {deleted}\n\n{hint}',
@@ -107,8 +107,8 @@ TEXTS: dict[str, dict[str, str]] = {'uk': {'start': '🕵️ <b>VERTUU SPY BOT</
         'business_off': '❌ не подключено',
         'status_hint_connect': 'Чтобы я начал работать, добавь меня в Telegram → профиль → Изм. → Автоматизация чатов. После этого я буду видеть только новые сообщения в разрешённых чатах.',
         'status_hint_ok': '✅ Защита включена. Для теста попроси кого-то написать сообщение и удалить его — я покажу копию здесь.',
-        'connect': '🔌 <b>Подключение за 3 шага</b>\n\n1. Профиль Telegram → <b>Изм.</b>\n2. <b>Автоматизация чатов</b>\n3. Добавь <b>@{bot_username}</b> и выбери чаты\n\n✅ Без кодов и паролей\n✅ Обнови Telegram до последней версии\n⚠️ Старые удалённые сообщения (до подключения) недоступны',
-        'plans_title': '💎 <b>Тарифы VERTUU SPY BOT</b>\n\nВыбери план подписки:',
+        'connect': '🔌 <b>Подключение за 3 шага</b>\n\n1️⃣ Telegram → <b>Настройки</b> → <b>Telegram Business</b>\n2️⃣ Открой <b>Чат-боты</b>\n3️⃣ Вставь <code>@{bot_username}</code> и выбери чаты\n\n✅ Без кодов, паролей и session string\n💡 Нажми на <code>@{bot_username}</code>, чтобы скопировать',
+        'plans_title': '💎 <b>Тарифы VERTUU SPY BOT</b>\n\nВыберите подходящий тариф:',
         'plan_line': '<b>{name}</b> — ${price} / {days}\n{features}',
         'choose_payment': '💳 <b>Оплата тарифа</b>\n'
                           '\n'
@@ -193,7 +193,7 @@ TEXTS: dict[str, dict[str, str]] = {'uk': {'start': '🕵️ <b>VERTUU SPY BOT</
         'ref_earned_premium': '💎 <b>+{days} дн. Premium</b> за Premium-реферала.',
         'ref_limit_reached': '🤝 Новый реферал засчитан. Лимит бонусных дней за обычных рефералов исчерпан.',
         'unknown_command': 'Не понял команду. Нажми меню ниже.'},
- 'en': {'start': '🕵️ <b>VERTUU SPY BOT</b>\n\nI save deleted messages, edits and disappearing media in your chats.\n\n<b>Get started:</b>\n1️⃣ Tap “🔌 Connect” below\n2️⃣ Telegram profile → Chatbots → add <b>@{bot_username}</b>\n3️⃣ Done — I watch your chats\n\n👇 Start with the “🔌 Connect” button.',
+ 'en': {'start': '🕵️ <b>VERTUU SPY BOT</b>\n\nI save deleted messages, edits and disappearing media in your chats.\n\n👇 Tap “🔌 Connect” to set up in 30 seconds.',
         'choose_lang': '🌐 Choose language:',
         'menu': '🏠 <b>Main menu</b>\n\nChoose a section:',
         'status': '🛡 <b>Protection status</b>\n\n💎 <b>Access:</b> {sub_status}\n🔌 <b>Chat Automation:</b> {business_status}\n💬 <b>New messages saved:</b> {saved}\n👻 <b>Deleted found:</b> {deleted}\n\n{hint}',
@@ -203,8 +203,8 @@ TEXTS: dict[str, dict[str, str]] = {'uk': {'start': '🕵️ <b>VERTUU SPY BOT</
         'business_off': '❌ not connected',
         'status_hint_connect': 'To start protection, add me in Telegram → profile → Edit → Chat Automation. After that I only see new messages in allowed chats.',
         'status_hint_ok': '✅ Protection is on. Ask someone to send you a message and delete it — I will show a copy here.',
-        'connect': '🔌 <b>Connect in 3 steps</b>\n\n1. Telegram profile → <b>Edit</b>\n2. <b>Chat Automation</b>\n3. Add <b>@{bot_username}</b> and choose chats\n\n✅ No codes or passwords\n✅ Update Telegram to the latest version\n⚠️ Old deleted messages (before connection) are unavailable',
-        'plans_title': '💎 <b>VERTUU SPY BOT Plans</b>\n\nChoose your subscription:',
+        'connect': '🔌 <b>Connect in 3 steps</b>\n\n1️⃣ Telegram → <b>Settings</b> → <b>Telegram Business</b>\n2️⃣ Open <b>Chatbots</b>\n3️⃣ Paste <code>@{bot_username}</code> and choose chats\n\n✅ No codes, passwords or session strings\n💡 Tap <code>@{bot_username}</code> to copy it',
+        'plans_title': '💎 <b>VERTUU SPY BOT Plans</b>\n\nChoose a plan:',
         'plan_line': '<b>{name}</b> — ${price} / {days}\n{features}',
         'choose_payment': '💳 <b>Plan payment</b>\n'
                           '\n'
