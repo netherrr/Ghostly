@@ -61,6 +61,24 @@ def back_menu(lang: str, to: str = "menu") -> dict[str, Any]:
     return inline([[(btn(lang, "back"), to)]])
 
 
+def connect_keyboard(lang: str) -> dict[str, Any]:
+    # tg://settings opens the user's Telegram Settings — the closest point to
+    # Telegram Business → Chatbots, which is where the bot is added. There is no
+    # public deep link straight to the Chatbots screen, so Settings is the best
+    # available shortcut and the instruction text guides the last two taps.
+    open_label = {
+        "uk": "🔌 Підключити",
+        "ru": "🔌 Подключить",
+        "en": "🔌 Connect",
+    }.get(lang, "🔌 Connect")
+    return {
+        "inline_keyboard": [
+            [{"text": open_label, "url": "tg://settings"}],
+            [{"text": btn(lang, "back"), "callback_data": "menu"}],
+        ]
+    }
+
+
 def _plan_stars(plan: dict[str, Any]) -> int | None:
     raw = plan.get("price_stars")
     try:

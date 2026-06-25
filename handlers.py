@@ -33,6 +33,7 @@ from keyboards import (
     broadcast_chat_keyboard,
     broadcast_menu_keyboard,
     cancel_keyboard,
+    connect_keyboard,
     crypto_payment_keyboard,
     inline,
     keyword_delete_keyboard,
@@ -1701,7 +1702,7 @@ class BotHandlers:
                 asset_path.name,
                 asset_path.read_bytes(),
                 caption[:1024],
-                back_menu(lang),
+                connect_keyboard(lang),
             )
             await self.track_sent(result, tg_id, f"connect_{lang}")
             return True
@@ -1724,7 +1725,7 @@ class BotHandlers:
                 tpl = dict(tpl)
                 tpl["text"] = f"{tpl.get('text') or ''}\n\n{label}: {e(video_url)}"
                 tpl["entities"] = []
-            await self.send_template_screen(tg_id, tpl, back_menu(lang), edit, track_key=key)
+            await self.send_template_screen(tg_id, tpl, connect_keyboard(lang), edit, track_key=key)
         else:
             if await self.send_connect_card(tg_id, lang, edit):
                 return
@@ -1734,7 +1735,7 @@ class BotHandlers:
                 label = "🎬 Video guide" if lang == "en" else "🎬 Видео-инструкция" if lang == "ru" else "🎬 Відео-інструкція"
                 text += f"\n\n{label}: {e(video_url)}"
                 entities = None
-            await self._send_or_edit(tg_id, text, back_menu(lang), edit, entities=entities, track_key=key)
+            await self._send_or_edit(tg_id, text, connect_keyboard(lang), edit, entities=entities, track_key=key)
         if video_file_id:
             caption = "🎬 Video guide" if lang == "en" else "🎬 Видео-инструкция" if lang == "ru" else "🎬 Відео-інструкція"
             try:
