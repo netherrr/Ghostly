@@ -2113,6 +2113,16 @@ Important: check the network before sending. If USDT is sent through the wrong n
 
     # ----- Broadcast chats -----
 
+    async def all_user_ids(self) -> list[int]:
+        """Every known bot user, newest first — used for in-bot broadcasts."""
+        async with self._pool().acquire() as con:
+            rows = await con.fetch("SELECT tg_id FROM users ORDER BY created_at DESC")
+            return [int(r["tg_id"]) for r in rows]
+
+    async def count_users(self) -> int:
+        async with self._pool().acquire() as con:
+            return int(await con.fetchval("SELECT COUNT(*) FROM users") or 0)
+
     async def list_broadcast_chats(self, active_only: bool = False) -> list[dict[str, Any]]:
         sql = "SELECT * FROM broadcast_chats"
         if active_only:
