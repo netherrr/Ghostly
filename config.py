@@ -64,7 +64,7 @@ def load_settings() -> Settings:
         webhook_secret=webhook_secret,
         port=int(os.getenv("PORT", "8080")),
         app_name=os.getenv("APP_NAME", "VERTUU SPY BOT").strip() or "VERTUU SPY BOT",
-        default_lang=os.getenv("DEFAULT_LANG", "uk").strip() or "uk",
+        default_lang=os.getenv("DEFAULT_LANG", "ru").strip() or "ru",
         crypto_pay_token=os.getenv("CRYPTO_PAY_TOKEN", "").strip() or None,
         crypto_pay_api_url=os.getenv("CRYPTO_PAY_API_URL", "https://pay.crypt.bot/api").rstrip("/"),
         message_retention_days=int(os.getenv("MESSAGE_RETENTION_DAYS", "30")),

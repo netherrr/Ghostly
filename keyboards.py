@@ -19,9 +19,12 @@ def support_button_text(lang: str) -> str:
 
 
 def main_menu(lang: str, is_admin: bool = False) -> dict[str, Any]:
+    # Connect is the primary action — full-width and first so new users reach
+    # the connection flow in one tap. The old Status block was removed to keep
+    # the home screen clean (access/days are shown on the subscription screen).
     rows = [
-        [(btn(lang, "status"), "status"), (btn(lang, "plans"), "plans")],
-        [(btn(lang, "connect"), "connect"), (btn(lang, "last_deleted"), "last_deleted")],
+        [(btn(lang, "connect"), "connect")],
+        [(btn(lang, "plans"), "plans"), (btn(lang, "last_deleted"), "last_deleted")],
         [(btn(lang, "keywords"), "keywords"), (btn(lang, "privacy"), "privacy")],
         [(btn(lang, "referrals"), "referrals"), (btn(lang, "lang"), "lang")],
         [(support_button_text(lang), "support")],
@@ -58,11 +61,26 @@ def back_menu(lang: str, to: str = "menu") -> dict[str, Any]:
     return inline([[(btn(lang, "back"), to)]])
 
 
+def _plan_stars(plan: dict[str, Any]) -> int | None:
+    raw = plan.get("price_stars")
+    try:
+        if raw is not None and str(raw).strip() not in {"", "0", "None", "null"}:
+            return int(raw)
+    except Exception:
+        pass
+    return None
+
+
 def plans_keyboard(lang: str, plans: list[dict[str, Any]]) -> dict[str, Any]:
     rows: list[list[tuple[str, str]]] = []
     for plan in plans:
         name = plan.get(f"name_{lang}") or plan.get("name_en") or plan["code"]
-        rows.append([(f"{btn(lang, 'buy')} {name} — ${plan['price_usd']}", f"buy:{plan['id']}")])
+        stars = _plan_stars(plan)
+        price = f"${plan['price_usd']}"
+        label = f"{btn(lang, 'buy')} {name} — {price}"
+        if stars:
+            label += f" ({stars}⭐️)"
+        rows.append([(label, f"buy:{plan['id']}")])
     rows.append([(btn(lang, "back"), "menu")])
     return inline(rows)
 

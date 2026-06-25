@@ -1542,7 +1542,7 @@ class BotHandlers:
         if tpl:
             await self.send_template_screen(tg_id, tpl, main_menu(lang, is_admin), track_key=key)
         else:
-            result = await self.bot.send_message(tg_id, tr(lang, "start", app=e(self.settings.app_name)), main_menu(lang, is_admin))
+            result = await self.bot.send_message(tg_id, tr(lang, "start", app=e(self.settings.app_name), bot_username=e(self.bot_username())), main_menu(lang, is_admin))
             await self.track_sent(result, tg_id, key)
         # If the trial/subscription has lapsed, gently prompt to subscribe.
         if not is_admin and not await self.db.active_subscription(tg_id):
@@ -1780,12 +1780,31 @@ class BotHandlers:
         text = tr(lang, "status", sub_status=e(sub_status), business_status=e(business_status), saved=saved, deleted=deleted, hint=e(hint))
         await self._send_or_edit(tg_id, text, back_menu(lang), edit, track_key=key)
 
+    def access_status_line(self, user: dict[str, Any] | None, lang: str) -> str:
+        sub_until = user.get("subscription_until") if user else None
+        if sub_until and sub_until > datetime.now(timezone.utc):
+            if lang == "en":
+                return f"✅ Access until: <b>{dt(sub_until)}</b>"
+            if lang == "uk":
+                return f"✅ Доступ до: <b>{dt(sub_until)}</b>"
+            return f"✅ Доступ до: <b>{dt(sub_until)}</b>"
+        if lang == "en":
+            return "🔒 No active subscription"
+        if lang == "uk":
+            return "🔒 Немає активної підписки"
+        return "🔒 Нет активной подписки"
+
     async def show_plans(self, tg_id: int, lang: str, edit: tuple[int, int] | None = None) -> None:
         try:
             plans = await self.db.plans(active_only=True)
+            user = await self.db.get_user(tg_id)
+            access_line = self.access_status_line(user, lang)
+            # Price is shown only on the buttons (with Stars), so the text block
+            # describes the benefit without duplicating the price.
             plan_lines = []
             for p in plans:
-                plan_lines.append(f"💎 {plan_name(p, lang)} — ${p['price_usd']} / {plan_duration_label(p.get('duration_days'), lang)}\n{plan_features(p, lang)}")
+                feats = plan_features(p, lang)
+                plan_lines.append(f"💎 <b>{e(plan_name(p, lang))}</b>\n{feats}" if feats else f"💎 <b>{e(plan_name(p, lang))}</b>")
             if not plans:
                 no_plans = (
                     "🔒 Активних тарифів поки немає. Поверніться пізніше."
@@ -1799,7 +1818,7 @@ class BotHandlers:
             key = f"plans_{lang}"
             tpl = await self.db.get_template(key)
             if tpl:
-                values = {"plans_list": "\n\n".join(plan_lines)}
+                values = {"plans_list": access_line + "\n\n" + "\n\n".join(plan_lines)}
                 rendered, ents = render_dynamic_template(str(tpl.get("text") or ""), tpl.get("entities") or [], values)
                 media = tpl.get("media")
                 if media:
@@ -1813,7 +1832,7 @@ class BotHandlers:
                 else:
                     await self._send_or_edit(tg_id, rendered, plans_keyboard(lang, plans), edit, entities=ents, track_key=key)
                 return
-            lines = [tr(lang, "plans_title", app=e(self.settings.app_name), bot_username=e(self.bot_username())), *plan_lines]
+            lines = [tr(lang, "plans_title", app=e(self.settings.app_name), bot_username=e(self.bot_username())), access_line, *plan_lines]
             await self._send_or_edit(tg_id, "\n\n".join(lines), plans_keyboard(lang, plans), edit, track_key=f"plans_{lang}")
         except Exception as exc:
             print("show_plans error:", repr(exc), flush=True)

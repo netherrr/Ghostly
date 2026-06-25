@@ -50,7 +50,7 @@ class Database:
             username TEXT,
             first_name TEXT,
             last_name TEXT,
-            lang TEXT NOT NULL DEFAULT 'uk',
+            lang TEXT NOT NULL DEFAULT 'ru',
             is_admin BOOLEAN NOT NULL DEFAULT FALSE,
             subscription_until TIMESTAMPTZ,
             free_deleted_today INT NOT NULL DEFAULT 0,
@@ -439,7 +439,7 @@ class Database:
                 "referral_percent": 30,
                 "uah_rate": 44,
                 # New referral model (days-based bonuses).
-                "trial_days": 1,
+                "trial_days": 2,
                 "access_gating_enabled": True,
                 "ref_normal_days": 2,
                 "ref_normal_limit": 3,
@@ -456,6 +456,17 @@ class Database:
                     """,
                     key,
                     json.dumps(value),
+                )
+
+            # One-time bump of the free trial to 2 days for already-seeded DBs
+            # (the INSERT above is DO NOTHING and would keep an old value of 1).
+            trial_bumped = await con.fetchval("SELECT value FROM settings WHERE key='trial_2days_v1'")
+            if not trial_bumped:
+                await con.execute(
+                    "INSERT INTO settings(key, value) VALUES('trial_days', '2'::jsonb) ON CONFLICT(key) DO UPDATE SET value='2'::jsonb, updated_at=NOW()"
+                )
+                await con.execute(
+                    "INSERT INTO settings(key, value) VALUES('trial_2days_v1', 'true'::jsonb) ON CONFLICT(key) DO UPDATE SET value='true'::jsonb, updated_at=NOW()"
                 )
 
             # One-time project setup requested by owner: prefill real payment
@@ -1807,7 +1818,7 @@ UQDbfUbzkI8lfO6G1KAPB_F2Et2IRTM4EvFhX5ATaXYrjoV3""",
         flipped in the same statement so it can never be granted twice, even on
         concurrent /start updates.
         """
-        trial_days = int(await self.get_setting("trial_days", 1) or 0)
+        trial_days = int(await self.get_setting("trial_days", 2) or 0)
         if trial_days <= 0:
             return None
         async with self._pool().acquire() as con:

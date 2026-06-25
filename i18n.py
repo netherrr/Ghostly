@@ -2,7 +2,7 @@ from __future__ import annotations
 
 SUPPORTED_LANGS = {'uk', 'ru', 'en'}
 
-TEXTS: dict[str, dict[str, str]] = {'uk': {'start': '🕵️ <b>VERTUU SPY BOT</b>\n\n👁 Видалені повідомлення\n✏️ Редагування (було/стало)\n🔥 Зникаючі медіа — кружки, голосові, фото, відео\n🔎 Ключові слова\n\nПрацює через офіційну Автоматизацію чатів Telegram. Без кодів і паролів.\n\nНатисни <b>🔌 Як підключити</b>.',
+TEXTS: dict[str, dict[str, str]] = {'uk': {'start': '🕵️ <b>VERTUU SPY BOT</b>\n\nЗберігаю видалені повідомлення, правки та зникаючі медіа у твоїх чатах.\n\n<b>Як почати:</b>\n1️⃣ Натисни «🔌 Підключити» нижче\n2️⃣ Профіль Telegram → Чат-боти → додай <b>@{bot_username}</b>\n3️⃣ Готово — я стежу за чатами\n\n👇 Почни з кнопки «🔌 Підключити».',
         'choose_lang': '🌐 Обери мову:',
         'menu': '🏠 <b>Головне меню</b>\n\nОбери розділ:',
         'status': '🛡 <b>Статус захисту</b>\n\n💎 <b>Доступ:</b> {sub_status}\n🔌 <b>Автоматизація чатів:</b> {business_status}\n💬 <b>Збережено нових повідомлень:</b> {saved}\n👻 <b>Видалених знайдено:</b> {deleted}\n\n{hint}',
@@ -91,13 +91,13 @@ TEXTS: dict[str, dict[str, str]] = {'uk': {'start': '🕵️ <b>VERTUU SPY BOT</
                               '\n'
                               'Перевірка: попроси когось надіслати повідомлення й видалити «для всіх».',
         'business_disabled': '⚠️ Business-підключення вимкнено.',
-        'trial_granted': '🎁 <b>{days} день Premium активовано.</b>\nДоступ до всіх функцій увімкнено.',
+        'trial_granted': '🎁 <b>Premium на {days} дн. активовано.</b>\nДоступ до всіх функцій увімкнено.',
         'access_locked': '🔒 <b>Доступ обмежено.</b>\nПробний період завершився. Оформи підписку, щоб користуватися ботом.',
         'ref_earned_normal': '🤝 <b>+{days} дн. Premium</b> за нового реферала.',
         'ref_earned_premium': '💎 <b>+{days} дн. Premium</b> за Premium-реферала.',
         'ref_limit_reached': '🤝 Новий реферал зараховано. Ліміт бонусних днів за звичайних рефералів вичерпано.',
         'unknown_command': 'Не зрозумів команду. Натисни меню нижче.'},
- 'ru': {'start': '🕵️ <b>VERTUU SPY BOT</b>\n\n👁 Удалённые сообщения\n✏️ Редактирование (было/стало)\n🔥 Исчезающие медиа — кружки, голосовые, фото, видео\n🔎 Ключевые слова\n\nРаботает через официальную Автоматизацию чатов Telegram. Без кодов и паролей.\n\nНажми <b>🔌 Как подключить</b>.',
+ 'ru': {'start': '🕵️ <b>VERTUU SPY BOT</b>\n\nСохраняю удалённые сообщения, правки и исчезающие медиа в твоих чатах.\n\n<b>Как начать:</b>\n1️⃣ Нажми «🔌 Подключить» ниже\n2️⃣ Профиль Telegram → Чат-боты → добавь <b>@{bot_username}</b>\n3️⃣ Готово — я слежу за чатами\n\n👇 Начни с кнопки «🔌 Подключить».',
         'choose_lang': '🌐 Выбери язык:',
         'menu': '🏠 <b>Главное меню</b>\n\nВыбери раздел:',
         'status': '🛡 <b>Статус защиты</b>\n\n💎 <b>Доступ:</b> {sub_status}\n🔌 <b>Автоматизация чатов:</b> {business_status}\n💬 <b>Сохранено новых сообщений:</b> {saved}\n👻 <b>Удалённых найдено:</b> {deleted}\n\n{hint}',
@@ -187,13 +187,13 @@ TEXTS: dict[str, dict[str, str]] = {'uk': {'start': '🕵️ <b>VERTUU SPY BOT</
                               '\n'
                               'Проверка: попроси кого-то отправить сообщение и удалить «для всех».',
         'business_disabled': '⚠️ Business-подключение выключено.',
-        'trial_granted': '🎁 <b>{days} день Premium активирован.</b>\nДоступ ко всем функциям включён.',
+        'trial_granted': '🎁 <b>Premium на {days} дн. активирован.</b>\nДоступ ко всем функциям включён.',
         'access_locked': '🔒 <b>Доступ ограничен.</b>\nПробный период закончился. Оформи подписку, чтобы пользоваться ботом.',
         'ref_earned_normal': '🤝 <b>+{days} дн. Premium</b> за нового реферала.',
         'ref_earned_premium': '💎 <b>+{days} дн. Premium</b> за Premium-реферала.',
         'ref_limit_reached': '🤝 Новый реферал засчитан. Лимит бонусных дней за обычных рефералов исчерпан.',
         'unknown_command': 'Не понял команду. Нажми меню ниже.'},
- 'en': {'start': '🕵️ <b>VERTUU SPY BOT</b>\n\n👁 Deleted messages\n✏️ Edits (before/after)\n🔥 Disappearing media — video notes, voice, photos, videos\n🔎 Keywords\n\nWorks through official Telegram Chat Automation. No codes or passwords.\n\nPress <b>🔌 How to connect</b>.',
+ 'en': {'start': '🕵️ <b>VERTUU SPY BOT</b>\n\nI save deleted messages, edits and disappearing media in your chats.\n\n<b>Get started:</b>\n1️⃣ Tap “🔌 Connect” below\n2️⃣ Telegram profile → Chatbots → add <b>@{bot_username}</b>\n3️⃣ Done — I watch your chats\n\n👇 Start with the “🔌 Connect” button.',
         'choose_lang': '🌐 Choose language:',
         'menu': '🏠 <b>Main menu</b>\n\nChoose a section:',
         'status': '🛡 <b>Protection status</b>\n\n💎 <b>Access:</b> {sub_status}\n🔌 <b>Chat Automation:</b> {business_status}\n💬 <b>New messages saved:</b> {saved}\n👻 <b>Deleted found:</b> {deleted}\n\n{hint}',
@@ -291,7 +291,7 @@ TEXTS: dict[str, dict[str, str]] = {'uk': {'start': '🕵️ <b>VERTUU SPY BOT</
 
 BUTTONS: dict[str, dict[str, str]] = {'uk': {'status': '🛡 Статус',
         'plans': '💎 Підписка',
-        'connect': '🔌 Як підключити',
+        'connect': '🔌 Підключити',
         'lang': '🌐 Мова',
         'privacy': '🔐 Приватність',
         'admin': '👑 Адмін',
@@ -317,7 +317,7 @@ BUTTONS: dict[str, dict[str, str]] = {'uk': {'status': '🛡 Статус',
         'admin_broadcast': '📢 Розсилки'},
  'ru': {'status': '🛡 Статус',
         'plans': '💎 Подписка',
-        'connect': '🔌 Как подключить',
+        'connect': '🔌 Подключить',
         'lang': '🌐 Язык',
         'privacy': '🔐 Приватность',
         'admin': '👑 Админ',
@@ -343,7 +343,7 @@ BUTTONS: dict[str, dict[str, str]] = {'uk': {'status': '🛡 Статус',
         'admin_broadcast': '📢 Рассылки'},
  'en': {'status': '🛡 Status',
         'plans': '💎 Plan',
-        'connect': '🔌 How to connect',
+        'connect': '🔌 Connect',
         'lang': '🌐 Language',
         'privacy': '🔐 Privacy',
         'admin': '👑 Admin',
@@ -370,11 +370,11 @@ BUTTONS: dict[str, dict[str, str]] = {'uk': {'status': '🛡 Статус',
 
 
 def tr(lang: str | None, key: str, **kwargs: object) -> str:
-    lang = lang if lang in SUPPORTED_LANGS else 'uk'
-    value = TEXTS[lang].get(key, TEXTS['uk'].get(key, key))
+    lang = lang if lang in SUPPORTED_LANGS else 'ru'
+    value = TEXTS[lang].get(key, TEXTS['ru'].get(key, key))
     return value.format(**kwargs)
 
 
 def btn(lang: str | None, key: str) -> str:
-    lang = lang if lang in SUPPORTED_LANGS else 'uk'
-    return BUTTONS[lang].get(key, BUTTONS['uk'].get(key, key))
+    lang = lang if lang in SUPPORTED_LANGS else 'ru'
+    return BUTTONS[lang].get(key, BUTTONS['ru'].get(key, key))
