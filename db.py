@@ -236,6 +236,9 @@ class Database:
         ALTER TABLE users ADD COLUMN IF NOT EXISTS trial_granted BOOLEAN NOT NULL DEFAULT FALSE;
         ALTER TABLE users ADD COLUMN IF NOT EXISTS is_premium_user BOOLEAN NOT NULL DEFAULT FALSE;
         ALTER TABLE users ADD COLUMN IF NOT EXISTS premium_checked_at TIMESTAMPTZ;
+        -- When FALSE, the bot ignores the owner's OWN edited/deleted messages and
+        -- only reports edits/deletions from other people.
+        ALTER TABLE users ADD COLUMN IF NOT EXISTS track_own_messages BOOLEAN NOT NULL DEFAULT TRUE;
 
         -- Each row is one referral accrual. referred_id is unique (when not null)
         -- so a single Telegram account can be credited at most once. Manual admin
@@ -1103,6 +1106,19 @@ Important: check the network before sending. If USDT is sent through the wrong n
     async def set_lang(self, tg_id: int, lang: str) -> None:
         async with self._pool().acquire() as con:
             await con.execute("UPDATE users SET lang=$2, updated_at=NOW() WHERE tg_id=$1", tg_id, lang)
+
+    async def get_track_own_messages(self, tg_id: int) -> bool:
+        async with self._pool().acquire() as con:
+            val = await con.fetchval("SELECT track_own_messages FROM users WHERE tg_id=$1", tg_id)
+        # Default to True for unknown users so behaviour is unchanged until toggled.
+        return True if val is None else bool(val)
+
+    async def set_track_own_messages(self, tg_id: int, enabled: bool) -> None:
+        async with self._pool().acquire() as con:
+            await con.execute(
+                "UPDATE users SET track_own_messages=$2, updated_at=NOW() WHERE tg_id=$1",
+                tg_id, bool(enabled),
+            )
 
     async def is_admin(self, tg_id: int) -> bool:
         if tg_id in self.settings.admin_ids:

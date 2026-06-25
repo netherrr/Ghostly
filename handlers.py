@@ -1953,12 +1953,16 @@ class BotHandlers:
         await self._send_or_edit(tg_id, text, keyword_delete_keyboard(lang, words), edit)
 
     async def show_last_deleted(self, tg_id: int, lang: str, edit: tuple[int, int] | None = None) -> None:
+        track_own = await self.db.get_track_own_messages(tg_id)
         async with self.db._pool().acquire() as con:
+            # When "track own" is off, hide the owner's own deleted messages so the
+            # list matches what the bot now forwards.
+            own_filter = "" if track_own else " AND (cm.sender_id IS NULL OR cm.sender_id <> de.owner_tg_id)"
             rows = await con.fetch(
-                """SELECT cm.chat_title, cm.sender_name, cm.text, cm.caption, cm.content_type, de.created_at
+                f"""SELECT cm.chat_title, cm.sender_name, cm.text, cm.caption, cm.content_type, de.created_at
                    FROM deleted_events de
                    LEFT JOIN cached_messages cm ON cm.id=de.cached_message_id
-                   WHERE de.owner_tg_id=$1
+                   WHERE de.owner_tg_id=$1{own_filter}
                    ORDER BY de.created_at DESC LIMIT 10""",
                 tg_id,
             )
@@ -1985,16 +1989,16 @@ class BotHandlers:
                         await self.bot.delete_message(chat_id, message_id)
                     except Exception:
                         pass
-                await self.send_template_content(tg_id, rendered, ents, media, last_deleted_keyboard(lang), track_key=key)
+                await self.send_template_content(tg_id, rendered, ents, media, last_deleted_keyboard(lang, track_own), track_key=key)
             else:
-                await self._send_or_edit(tg_id, rendered, last_deleted_keyboard(lang), edit, entities=ents, track_key=key)
+                await self._send_or_edit(tg_id, rendered, last_deleted_keyboard(lang, track_own), edit, entities=ents, track_key=key)
             return
 
         if not rows:
-            await self._send_or_edit(tg_id, deleted_list, last_deleted_keyboard(lang), edit, track_key=key)
+            await self._send_or_edit(tg_id, deleted_list, last_deleted_keyboard(lang, track_own), edit, track_key=key)
             return
         title = "👻 <b>Last deleted</b>" if lang == "en" else "👻 <b>Останні видалені</b>" if lang == "uk" else "👻 <b>Последние удалённые</b>"
-        await self._send_or_edit(tg_id, f"{title}\n\n{deleted_list}", last_deleted_keyboard(lang), edit, track_key=key)
+        await self._send_or_edit(tg_id, f"{title}\n\n{deleted_list}", last_deleted_keyboard(lang, track_own), edit, track_key=key)
 
     def disappearing_guide_text(self, lang: str) -> str:
         if lang == "ru":
@@ -2309,6 +2313,10 @@ class BotHandlers:
             await self.show_support(tg_id, lang, edit)
         elif data == "disappearing_guide":
             await self.show_disappearing_guide(tg_id, lang, edit)
+        elif data == "toggle_own":
+            new_val = not await self.db.get_track_own_messages(tg_id)
+            await self.db.set_track_own_messages(tg_id, new_val)
+            await self.show_last_deleted(tg_id, lang, edit)
         elif data == "support_custom":
             await self.db.set_state(tg_id, "support_stars_amount", {})
             await self._send_or_edit(tg_id, state_prompt(lang, "support_stars_amount", {}), back_menu(lang, "support"), edit)
@@ -3950,6 +3958,9 @@ class BotHandlers:
             return
         if old and (old.get("text") or old.get("caption")) == (new.get("text") or new.get("caption")):
             return
+        # Owner opted out of seeing their OWN edits: skip messages they sent.
+        if new.get("sender_id") and int(new["sender_id"]) == owner_id and not await self.db.get_track_own_messages(owner_id):
+            return
         if not await self.db.active_subscription(owner_id):
             return
         lang = await self.user_lang(owner_id)
@@ -4071,6 +4082,10 @@ class BotHandlers:
                                 await self.safe_send(owner_id, msg)
                                 await self.db.consume_free_deleted(owner_id)
                             continue
+            # Owner opted out of seeing their OWN deletions: record but don't forward.
+            if cached.get("sender_id") and int(cached["sender_id"]) == owner_id and not await self.db.get_track_own_messages(owner_id):
+                await self.db.mark_deleted_event(bc_id, owner_id, chat_id, int(message_id), int(cached["id"]), data, False)
+                continue
             print("Deleted event cached match", {
                 "deleted_message_id": int(message_id),
                 "cached_id": cached.get("id"),
