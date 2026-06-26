@@ -53,7 +53,7 @@ from keyboards import (
 
 # Bump on every deploy. Shown in /edit and /health so it is obvious at a glance
 # whether the running bot actually has the latest code (i.e. Railway redeployed).
-BUILD = "2026-06-26 · edit-alerts-v13"
+BUILD = "2026-06-26 · admin-chat-v14"
 
 
 def e(value: Any) -> str:
@@ -2917,9 +2917,9 @@ class BotHandlers:
                 f"Amount: <b>{stars} ⭐</b>\n"
                 f"Payment ID: <code>{int(payment['id'])}</code>"
             )
-            for admin_id in self.settings.admin_ids:
-                if int(admin_id) != int(tg_id):
-                    await self.safe_send(int(admin_id), admin_text)
+            for target in self.admin_notify_targets():
+                if int(target) != int(tg_id):
+                    await self.safe_send(int(target), admin_text)
             return
 
         paid = await self.db.mark_payment_paid(int(payment["id"]), raw=raw)
@@ -2946,6 +2946,17 @@ class BotHandlers:
             result = await self.bot.send_message(tg_id, state_prompt(lang, "manual_payment_proof", {"payment_id": payment_id}), cancel_keyboard(lang, "plans"))
             await self.track_sent(result, tg_id, key)
 
+    def admin_notify_targets(self) -> list[int]:
+        """Where admin notifications (payment requests, proofs, receipts) go.
+
+        If ADMIN_CHAT_ID is configured, everything is sent to that single chat
+        (a group/channel where the bot is admin) instead of each admin's private
+        chat. Otherwise it falls back to the personal chats from ADMIN_IDS.
+        """
+        if self.settings.admin_chat_id:
+            return [self.settings.admin_chat_id]
+        return list(self.settings.admin_ids)
+
     async def notify_admin_payment(self, payment_id: int) -> None:
         payment = await self.db.get_payment(payment_id)
         if not payment:
@@ -2964,7 +2975,7 @@ class BotHandlers:
             f"Amount: <b>${e(payment['amount_usd'])}</b>\n"
             f"Proof: <b>{e(proof_summary(proof))}</b>"
         )
-        for admin_id in self.settings.admin_ids:
+        for admin_id in self.admin_notify_targets():
             try:
                 await self.bot.send_message(admin_id, admin_text, admin_payment_keyboard(payment_id))
                 if proof and proof.get("source_chat_id") and proof.get("source_message_id"):
@@ -3150,21 +3161,24 @@ class BotHandlers:
             await self.show_admin_users(tg_id, lang, edit)
 
     async def send_payment_proof_to_admin(self, admin_id: int, lang: str, payment_id: int) -> None:
+        # When an admin chat is configured, the proof is resent there (where the
+        # "Proof" button lives); otherwise back to the admin who pressed it.
+        target = self.settings.admin_chat_id or admin_id
         payment = await self.db.get_payment(payment_id)
         if not payment:
-            await self.bot.send_message(admin_id, "Заявку не знайдено.")
+            await self.bot.send_message(target, "Заявку не знайдено.")
             return
         raw = decode_json(payment.get("raw"), {}) or {}
         proof = raw.get("proof") if isinstance(raw, dict) else None
         if not proof:
-            await self.bot.send_message(admin_id, "📎 Доказ оплати ще не додано.")
+            await self.bot.send_message(target, "📎 Доказ оплати ще не додано.")
             return
-        await self.bot.send_message(admin_id, f"📎 Доказ для заявки <code>#{payment_id}</code>: <b>{e(proof_summary(proof))}</b>")
+        await self.bot.send_message(target, f"📎 Доказ для заявки <code>#{payment_id}</code>: <b>{e(proof_summary(proof))}</b>")
         if proof.get("source_chat_id") and proof.get("source_message_id"):
             try:
-                await self.bot.copy_message(admin_id, int(proof["source_chat_id"]), int(proof["source_message_id"]))
+                await self.bot.copy_message(target, int(proof["source_chat_id"]), int(proof["source_message_id"]))
             except Exception as exc:
-                await self.bot.send_message(admin_id, f"Не вийшло скопіювати доказ: <code>{e(repr(exc))}</code>")
+                await self.bot.send_message(target, f"Не вийшло скопіювати доказ: <code>{e(repr(exc))}</code>")
 
     async def show_admin_stats(self, tg_id: int, lang: str, edit: tuple[int, int] | None = None) -> None:
         from datetime import datetime, timezone
@@ -3708,8 +3722,19 @@ class BotHandlers:
         if not chat_id or ctype not in {"group", "supergroup", "channel"}:
             return
         if status == "administrator":
+            # The dedicated admin chat must never become a broadcast target —
+            # it only receives admin notifications, receipts and confirmations.
+            if self.settings.admin_chat_id and int(chat_id) == int(self.settings.admin_chat_id):
+                try:
+                    await self.bot.send_message(
+                        int(chat_id),
+                        "✅ <b>Цей чат підключено як адмін-чат.</b>\n\nСюди приходитимуть заявки на оплату, квитанції/докази та кнопки підтвердження. Клієнтські розсилки сюди не надсилаються.",
+                    )
+                except Exception:
+                    pass
+                return
             await self.db.add_broadcast_chat(int(chat_id), title=chat.get("title"), chat_type=ctype)
-            for admin_id in self.settings.admin_ids:
+            for admin_id in self.admin_notify_targets():
                 try:
                     await self.bot.send_message(int(admin_id), f"📢 Бот став адміном у <b>{e(chat.get('title') or chat_id)}</b> — чат додано до розсилок.")
                 except Exception:
