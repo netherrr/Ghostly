@@ -409,11 +409,14 @@ DYNAMIC_TEMPLATE_SPECS = {
         },
     },
     "keywords": {
-        "vars": ["keywords_list", "keywords_count", "keywords_hint"],
+        # The monitored-groups label and the /watch how-to used to be locked
+        # inside the {keywords_hint} value; they are inlined here so they can be
+        # fully edited. Only pure data stays in variables.
+        "vars": ["keywords_count", "keywords_list", "monitored_groups"],
         "default": {
-            "uk": "🔎 Сповіщення за ключовими словами\n\nСлів: {keywords_count}\n\n{keywords_list}\n\n{keywords_hint}",
-            "ru": "🔎 Оповещения по ключевым словам\n\nСлов: {keywords_count}\n\n{keywords_list}\n\n{keywords_hint}",
-            "en": "🔎 Keyword alerts\n\nKeywords: {keywords_count}\n\n{keywords_list}\n\n{keywords_hint}",
+            "uk": "🔎 Сповіщення за ключовими словами\n\nСлів: {keywords_count}\n\n{keywords_list}\n\n📡 Групи на моніторингу:\n{monitored_groups}\n\nℹ️ Додай мене в групу (адміном) і надішли там /watch. Я напишу в особисті, коли зʼявляться твої слова. /unwatch — вимкнути.",
+            "ru": "🔎 Оповещения по ключевым словам\n\nСлов: {keywords_count}\n\n{keywords_list}\n\n📡 Группы на мониторинге:\n{monitored_groups}\n\nℹ️ Добавь меня в группу (админом) и отправь там /watch. Я напишу в личку, когда встретятся твои слова. /unwatch — выключить.",
+            "en": "🔎 Keyword alerts\n\nKeywords: {keywords_count}\n\n{keywords_list}\n\n📡 Monitored groups:\n{monitored_groups}\n\nℹ️ Add me to a group (as admin) and send /watch there. I'll DM you when your keywords appear. /unwatch to stop.",
         },
     },
     "deleted": {
@@ -1483,12 +1486,26 @@ class BotHandlers:
                 f"{extra}\n\n"
                 "Скасувати: /start",
             )
-            await self.send_current_text_for_copy(tg_id, editable)
+            await self.send_current_text_for_copy(
+                tg_id, editable,
+                title="📋 Шаблон — копіюй і редагуй (змінні в {…} лишай, щоб дані оновлювались):",
+            )
+            # Also show the screen exactly as it looks right now, with every emoji
+            # and live value substituted in. On dynamic screens the template above
+            # hides text inside {variables}; this block lets the admin see and
+            # rewrite ANY visible character. Sending it back makes the screen a
+            # fixed custom text (no auto-updating data).
+            onscreen = str(target.get("text") or target.get("caption") or "")
+            if onscreen.strip() and onscreen.strip() != (editable or "").strip():
+                await self.send_current_text_for_copy(
+                    tg_id, onscreen,
+                    title="🖥 Так екран виглядає зараз (з усіма емодзі та даними). Можеш надіслати свій повний текст — тоді екран стане статичним:",
+                )
             return
 
         await self.perform_admin_edit(tg_id, lang, payload, new_text, entities)
 
-    async def send_current_text_for_copy(self, tg_id: int, editable: str) -> None:
+    async def send_current_text_for_copy(self, tg_id: int, editable: str, title: str | None = None) -> None:
         """Send the FULL current text as copyable <pre> blocks.
 
         Long screens exceed Telegram's per-message limit, so the text is split
@@ -1498,13 +1515,14 @@ class BotHandlers:
         editable = editable or ""
         if not editable.strip():
             return
+        base_title = title or "📋 Поточний текст — копіюй і редагуй:"
         chunks = split_escaped_for_pre(editable)
         total = len(chunks)
         for idx, chunk in enumerate(chunks, 1):
             header = (
-                f"📋 <b>Поточний текст ({idx}/{total}) — копіюй і редагуй:</b>\n"
+                f"<b>{e(base_title)}</b> ({idx}/{total})\n"
                 if total > 1
-                else "📋 <b>Поточний текст — копіюй і редагуй:</b>\n"
+                else f"<b>{e(base_title)}</b>\n"
             )
             try:
                 await self.bot.send_message(tg_id, f"{header}<pre>{e(chunk)}</pre>")
@@ -2082,6 +2100,8 @@ class BotHandlers:
             values = {
                 "keywords_list": body,
                 "keywords_count": str(len(words)),
+                "monitored_groups": groups_body,
+                # Kept so older saved templates using {keywords_hint} still render.
                 "keywords_hint": hint,
             }
             rendered, ents = render_dynamic_template(str(tpl.get("text") or ""), tpl.get("entities") or [], values)
