@@ -2215,6 +2215,12 @@ Important: check the network before sending. If USDT is sent through the wrong n
             return dict(row)
 
     async def extended_stats(self) -> dict[str, Any]:
+        # Current UAH/USD rate is used only as a fallback for old card payments
+        # that were saved before we started storing the native UAH amount.
+        try:
+            uah_rate = Decimal(str(await self.get_setting("uah_rate", 44) or 44))
+        except Exception:
+            uah_rate = Decimal("44")
         async with self._pool().acquire() as con:
             row = await con.fetchrow(
                 """
@@ -2237,6 +2243,18 @@ Important: check the network before sending. If USDT is sent through the wrong n
                   (SELECT COALESCE(SUM(amount_usd),0) FROM payments WHERE status='paid' AND provider='cryptobot') AS revenue_crypto,
                   (SELECT COALESCE(SUM(amount_usd),0) FROM payments WHERE status='paid' AND provider='telegram_stars') AS revenue_stars,
                   (SELECT COALESCE(SUM(amount_usd),0) FROM payments WHERE status='paid' AND provider IN ('usdt_trc20','usdt_bep20')) AS revenue_usdt,
+                  -- Per-currency revenue, counted in the currency actually paid.
+                  (SELECT COALESCE(SUM(COALESCE(NULLIF(raw->>'amount_uah','')::numeric, amount_usd * $1)),0)
+                     FROM payments WHERE status='paid' AND provider='ua_card') AS revenue_uah,
+                  (SELECT COUNT(*) FROM payments WHERE status='paid' AND provider='ua_card') AS payments_uah_count,
+                  (SELECT COALESCE(SUM(NULLIF(raw->>'stars','')::numeric),0)
+                     FROM payments WHERE status='paid' AND currency='XTR') AS revenue_stars_native,
+                  (SELECT COUNT(*) FROM payments WHERE status='paid' AND currency='XTR') AS payments_stars_count,
+                  (SELECT COALESCE(SUM(amount_usd),0)
+                     FROM payments WHERE status='paid' AND provider IN ('cryptobot','usdt_trc20','usdt_bep20','binance_id')) AS revenue_crypto_usd,
+                  (SELECT COUNT(*) FROM payments WHERE status='paid' AND provider IN ('cryptobot','usdt_trc20','usdt_bep20','binance_id')) AS payments_crypto_count,
+                  (SELECT COALESCE(SUM(amount_usd),0) FROM payments WHERE status='paid' AND provider='ton') AS revenue_ton_usd,
+                  (SELECT COUNT(*) FROM payments WHERE status='paid' AND provider='ton') AS payments_ton_count,
                   (SELECT COUNT(*) FROM payments WHERE status='paid') AS payments_paid_count,
                   (SELECT COUNT(*) FROM payments WHERE status IN ('pending','waiting_admin') AND provider <> 'cryptobot') AS payments_pending,
                   (SELECT COUNT(*) FROM payments WHERE status='rejected') AS payments_rejected,
@@ -2245,7 +2263,8 @@ Important: check the network before sending. If USDT is sent through the wrong n
                   (SELECT COALESCE(SUM(amount_usd),0) FROM payments WHERE status='paid' AND created_at >= NOW() - INTERVAL '30 days') AS revenue_30d,
                   (SELECT COUNT(*) FROM user_keywords WHERE is_active=TRUE) AS keywords_active,
                   (SELECT COUNT(DISTINCT owner_tg_id) FROM user_keywords WHERE is_active=TRUE) AS keywords_users
-                """
+                """,
+                uah_rate,
             )
             base = dict(row)
 
