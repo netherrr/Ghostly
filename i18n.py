@@ -47,6 +47,7 @@ TEXTS: dict[str, dict[str, str]] = {'uk': {'start': '🕵️ <b>VERTUU SPY BOT</
                        '\n'
                        'Тепер можеш користуватися Pro-функціями.',
         'crypto_not_paid': 'Поки не бачу оплату. Спробуй ще раз після підтвердження платежу.',
+        'payment_rejected': '❌ <b>Оплату відхилено.</b>\n\nЯкщо це помилка — звернись у підтримку або спробуй інший спосіб оплати.',
         'payment_error': 'Не вийшло створити/перевірити платіж. Напиши підтримці або спробуй інший спосіб.',
         'deleted_title': '👁 <b>Повідомлення видалили</b>',
         'alert_deleted': '👁 <b>Повідомлення видалили</b>\n\n💬 <b>Чат:</b> {chat}\n👤 <b>Автор:</b> {author}\n🕒 <b>Час:</b> {time}\n\n{saved}',
@@ -155,6 +156,7 @@ TEXTS: dict[str, dict[str, str]] = {'uk': {'start': '🕵️ <b>VERTUU SPY BOT</
                        '\n'
                        'Теперь можешь пользоваться Pro-функциями.',
         'crypto_not_paid': 'Пока не вижу оплату. Попробуй ещё раз после подтверждения платежа.',
+        'payment_rejected': '❌ <b>Оплата отклонена.</b>\n\nЕсли это ошибка — напиши в поддержку или попробуй другой способ оплаты.',
         'payment_error': 'Не получилось создать/проверить платёж. Напиши поддержке или попробуй другой способ.',
         'deleted_title': '👁 <b>Сообщение удалили</b>',
         'alert_deleted': '👁 <b>Сообщение удалили</b>\n\n💬 <b>Чат:</b> {chat}\n👤 <b>Автор:</b> {author}\n🕒 <b>Время:</b> {time}\n\n{saved}',
@@ -264,6 +266,7 @@ TEXTS: dict[str, dict[str, str]] = {'uk': {'start': '🕵️ <b>VERTUU SPY BOT</
                        '\n'
                        'You can now use Pro features.',
         'crypto_not_paid': 'I do not see the payment yet. Try again after the payment is confirmed.',
+        'payment_rejected': '❌ <b>Payment rejected.</b>\n\nIf this is a mistake, contact support or try another payment method.',
         'payment_error': 'Could not create/check payment. Contact support or try another method.',
         'deleted_title': '👁 <b>Message deleted</b>',
         'alert_deleted': '👁 <b>Message deleted</b>\n\n💬 <b>Chat:</b> {chat}\n👤 <b>From:</b> {author}\n🕒 <b>Time:</b> {time}\n\n{saved}',
