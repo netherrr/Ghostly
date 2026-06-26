@@ -68,7 +68,7 @@ ADMIN_CHAT_ID=-1001234567890
 WEBHOOK_BASE_URL=https://твій-домен.up.railway.app
 WEBHOOK_SECRET=будь-який-довгий-рандомний-рядок
 APP_NAME=ChatGuard
-DEFAULT_LANG=uk
+DEFAULT_LANG=ru
 CRYPTO_PAY_TOKEN=...
 ```
 

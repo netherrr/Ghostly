@@ -53,7 +53,7 @@ from keyboards import (
 
 # Bump on every deploy. Shown in /edit and /health so it is obvious at a glance
 # whether the running bot actually has the latest code (i.e. Railway redeployed).
-BUILD = "2026-06-26 · admin-chat-v16"
+BUILD = "2026-06-26 · admin-chat-v17"
 
 
 def e(value: Any) -> str:
@@ -3110,7 +3110,7 @@ class BotHandlers:
         else:
             await self.db.mark_payment_status(payment_id, "rejected", admin_id=admin_id)
             await self._resolve_admin_payment_message(edit, msg, "❌ ВІДХИЛЕНО")
-            await self.bot.send_message(user_id, "❌ Оплату відхилено / Payment rejected / Оплата отклонена.")
+            await self.editable_send(user_id, "payment_rejected", user_lang, keyboard=main_menu(user_lang, False))
 
     async def handle_admin_callback(self, tg_id: int, lang: str, data: str, edit: tuple[int, int] | None) -> None:
         if not await self.db.is_admin(tg_id):
