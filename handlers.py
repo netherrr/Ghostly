@@ -393,19 +393,28 @@ TEMPLATE_ALIASES = {
 
 DYNAMIC_TEMPLATE_SPECS = {
     "status": {
-        "vars": ["plan_name", "business_status", "saved_count", "deleted_count", "status_hint"],
+        # Every emoji/label lives in the template (so each can be edited, incl.
+        # Premium emoji). Only data is injected ({sub_until}, counts). The *_flag
+        # variables just pick which state line is shown — they print nothing.
+        "vars": [
+            "sub_until", "sub_active_flag", "sub_free_flag",
+            "biz_on_flag", "biz_off_flag", "saved_count", "deleted_count",
+            "hint_ok_flag", "hint_connect_flag",
+        ],
         "default": {
-            "uk": "🛡 Статус захисту\n\n💎 Підписка: {plan_name}\n🔌 Business-підключення: {business_status}\n💬 Збережено нових повідомлень: {saved_count}\n👻 Видалених знайдено: {deleted_count}\n\n{status_hint}",
-            "ru": "🛡 Статус защиты\n\n💎 Подписка: {plan_name}\n🔌 Business-подключение: {business_status}\n💬 Сохранено новых сообщений: {saved_count}\n👻 Удалённых найдено: {deleted_count}\n\n{status_hint}",
-            "en": "🛡 Protection status\n\n💎 Subscription: {plan_name}\n🔌 Business connection: {business_status}\n💬 New messages saved: {saved_count}\n👻 Deleted found: {deleted_count}\n\n{status_hint}",
+            "uk": "🛡 Статус захисту\n\n💎 Доступ: активна до {sub_until}{sub_active_flag}\n💎 Доступ: відкритий доступ{sub_free_flag}\n🔌 Автоматизація чатів: ✅ підключено{biz_on_flag}\n🔌 Автоматизація чатів: ❌ не підключено{biz_off_flag}\n💬 Збережено нових повідомлень: {saved_count}\n👻 Видалених знайдено: {deleted_count}\n\n✅ Захист увімкнений. Для тесту попроси когось написати повідомлення й видалити його — я покажу копію тут.{hint_ok_flag}\nЩоб я почав працювати, додай мене в Telegram → профіль → Змінити → Автоматизація чатів. Після цього я бачитиму тільки нові повідомлення в дозволених чатах.{hint_connect_flag}",
+            "ru": "🛡 Статус защиты\n\n💎 Доступ: активна до {sub_until}{sub_active_flag}\n💎 Доступ: открытый доступ{sub_free_flag}\n🔌 Автоматизация чатов: ✅ подключено{biz_on_flag}\n🔌 Автоматизация чатов: ❌ не подключено{biz_off_flag}\n💬 Сохранено новых сообщений: {saved_count}\n👻 Удалённых найдено: {deleted_count}\n\n✅ Защита включена. Для теста попроси кого-то написать сообщение и удалить его — я покажу копию здесь.{hint_ok_flag}\nЧтобы я начал работать, добавь меня в Telegram → профиль → Изм. → Автоматизация чатов. После этого я буду видеть только новые сообщения в разрешённых чатах.{hint_connect_flag}",
+            "en": "🛡 Protection status\n\n💎 Access: active until {sub_until}{sub_active_flag}\n💎 Access: open access{sub_free_flag}\n🔌 Chat Automation: ✅ connected{biz_on_flag}\n🔌 Chat Automation: ❌ not connected{biz_off_flag}\n💬 New messages saved: {saved_count}\n👻 Deleted found: {deleted_count}\n\n✅ Protection is on. Ask someone to send you a message and delete it — I will show a copy here.{hint_ok_flag}\nTo start protection, add me in Telegram → profile → Edit → Chat Automation. After that I only see new messages in allowed chats.{hint_connect_flag}",
         },
     },
     "plans": {
-        "vars": ["plans_list"],
+        # access_until is the only data; the *_flag variables choose which access
+        # line shows. All emoji/text stay editable in the template.
+        "vars": ["access_until", "access_active_flag", "access_none_flag"],
         "default": {
-            "uk": "💎 Тарифи VERTUU SPY BOT\n\n{plans_list}",
-            "ru": "💎 Тарифы VERTUU SPY BOT\n\n{plans_list}",
-            "en": "💎 VERTUU SPY BOT plans\n\n{plans_list}",
+            "uk": "💎 Тарифи VERTUU SPY BOT\n\n✅ Доступ до {access_until}{access_active_flag}\n🔒 Немає активної підписки{access_none_flag}",
+            "ru": "💎 Тарифы VERTUU SPY BOT\n\n✅ Доступ до {access_until}{access_active_flag}\n🔒 Нет активной подписки{access_none_flag}",
+            "en": "💎 VERTUU SPY BOT plans\n\n✅ Access until {access_until}{access_active_flag}\n🔒 No active subscription{access_none_flag}",
         },
     },
     "keywords": {
@@ -584,18 +593,26 @@ def render_dynamic_template(text: str, entities: list[dict[str, Any]] | None, va
     # inline emoji/label on such a line stays editable yet only shows when there
     # is data to display.
     source, entities = _drop_empty_optional_lines(text or "", entities, values)
+    # Presence flags (name ends with `_flag`) decide which state line survives
+    # above, but must render as nothing — they only switch lines on/off so that
+    # the visible emoji/label can live (and be edited, incl. Premium emoji) in
+    # the template instead of inside an injected value.
+    subst = {
+        k: ("" if k.endswith("_flag") else str(v if v is not None else ""))
+        for k, v in values.items()
+    }
     repls: list[tuple[int, int, int]] = []
     for m in re.finditer(r"\{([a-zA-Z0-9_]+)\}", source):
         name = m.group(1)
         if name not in values:
             continue
         old_token = m.group(0)
-        new_val = str(values.get(name) or "")
+        new_val = subst.get(name, "")
         repls.append((utf16_len(source[:m.start()]), utf16_len(old_token), utf16_len(new_val)))
 
     rendered = source
-    for name, value in values.items():
-        rendered = rendered.replace("{" + name + "}", str(value or ""))
+    for name in values:
+        rendered = rendered.replace("{" + name + "}", subst.get(name, ""))
 
     if not repls:
         return rendered, entities
@@ -1464,12 +1481,25 @@ class BotHandlers:
                 if is_dynamic_template_key(template_key):
                     base = template_base(template_key)
                     editable = str((current_tpl or {}).get("text") or dynamic_template_default(base, lang))
-                    protected = " ".join(["{" + v + "}" for v in dynamic_required_vars(base)])
+                    all_vars = dynamic_required_vars(base)
+                    data_vars = [v for v in all_vars if not v.endswith("_flag")]
+                    flag_vars = [v for v in all_vars if v.endswith("_flag")]
                     extra += (
-                        "\n\n🔒 <b>Це динамічний екран.</b> Змінні нижче підставляють живі дані."
-                        "\nМожеш залишити їх — тоді дані будуть оновлюватись. Можеш прибрати — тоді екран стане статичним."
-                        f"\n<code>{e(protected)}</code>"
+                        "\n\n🎨 <b>Емодзі й текст можна міняти будь-як</b> (зокрема Premium emoji) — просто не чіпай те, що у фігурних дужках."
                     )
+                    if data_vars:
+                        protected = " ".join(["{" + v + "}" for v in data_vars])
+                        extra += (
+                            "\n\n📊 <b>Дані</b> (підставляються самі, напр. дата/лічильники) — лиши як є:"
+                            f"\n<code>{e(protected)}</code>"
+                        )
+                    if flag_vars:
+                        flags = " ".join(["{" + v + "}" for v in flag_vars])
+                        extra += (
+                            "\n\n🔁 <b>Перемикачі станів</b> (нічого не друкують, але обирають, який рядок показати — напр. «підключено» чи «не підключено»). "
+                            "Залиш їх у тих самих рядках:"
+                            f"\n<code>{e(flags)}</code>"
+                        )
             else:
                 extra = "\n\nℹ️ Це буде разове редагування конкретного повідомлення."
                 # Show the current text too, so a one-off message is just as easy
@@ -1980,7 +2010,8 @@ class BotHandlers:
             saved = await con.fetchval("SELECT COUNT(*) FROM cached_messages WHERE owner_tg_id=$1", tg_id) or 0
             deleted = await con.fetchval("SELECT COUNT(*) FROM deleted_events WHERE owner_tg_id=$1", tg_id) or 0
         sub_until = user.get("subscription_until") if user else None
-        sub_status = tr(lang, "sub_active", date=dt(sub_until)) if sub_until and sub_until > datetime.now(timezone.utc) else tr(lang, "sub_free")
+        sub_active = bool(sub_until and sub_until > datetime.now(timezone.utc))
+        sub_status = tr(lang, "sub_active", date=dt(sub_until)) if sub_active else tr(lang, "sub_free")
         has_business = await self.db.user_has_business(tg_id)
         business_status = tr(lang, "business_on") if has_business else tr(lang, "business_off")
         hint = tr(lang, "status_hint_ok") if has_business else tr(lang, "status_hint_connect")
@@ -1989,10 +2020,19 @@ class BotHandlers:
         tpl = await self.db.get_template(key)
         if tpl:
             values = {
-                "plan_name": sub_status,
-                "business_status": business_status,
+                # Pure data + presence flags for the new editable template.
+                "sub_until": dt(sub_until) if sub_active else "",
+                "sub_active_flag": "1" if sub_active else "",
+                "sub_free_flag": "" if sub_active else "1",
+                "biz_on_flag": "1" if has_business else "",
+                "biz_off_flag": "" if has_business else "1",
                 "saved_count": str(saved),
                 "deleted_count": str(deleted),
+                "hint_ok_flag": "1" if has_business else "",
+                "hint_connect_flag": "" if has_business else "1",
+                # Kept so older saved status templates still render unchanged.
+                "plan_name": sub_status,
+                "business_status": business_status,
                 "status_hint": hint,
             }
             rendered, ents = render_dynamic_template(str(tpl.get("text") or ""), tpl.get("entities") or [], values)
@@ -2041,12 +2081,21 @@ class BotHandlers:
                 return
             user = await self.db.get_user(tg_id)
             access_line = self.access_status_line(user, lang)
+            sub_until = user.get("subscription_until") if user else None
+            sub_active = bool(sub_until and sub_until > datetime.now(timezone.utc))
             # The full plan list (name, price, Stars) lives on the buttons, so the
             # text stays minimal: a short title and the user's current access.
             key = f"plans_{lang}"
             tpl = await self.db.get_template(key)
             if tpl:
-                values = {"plans_list": access_line}
+                values = {
+                    # Pure data + presence flags for the new editable template.
+                    "access_until": dt(sub_until) if sub_active else "",
+                    "access_active_flag": "1" if sub_active else "",
+                    "access_none_flag": "" if sub_active else "1",
+                    # Kept so older saved plans templates still render unchanged.
+                    "plans_list": access_line,
+                }
                 rendered, ents = render_dynamic_template(str(tpl.get("text") or ""), tpl.get("entities") or [], values)
                 media = tpl.get("media")
                 if media:
