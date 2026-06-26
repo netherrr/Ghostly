@@ -55,6 +55,11 @@ TEXTS: dict[str, dict[str, str]] = {'uk': {'start': '🕵️ <b>VERTUU SPY BOT</
         'alert_media_backup': '🔥 <b>Медіа збережено</b>\n\n💬 <b>Чат:</b> {chat}\n👤 <b>Автор:</b> {author}\n📎 <b>Тип:</b> {type}\n\nЯ зберіг це медіа одразу, тому таймерові/зникаючі повідомлення не загубляться.',
         'alert_timer_reply': '🔥 <b>Таймерове медіа — витягнуто через відповідь</b>\n\n💬 <b>Чат:</b> {chat}\n👤 <b>Автор:</b> {author}\n📎 <b>Тип:</b> {type}\n\nВи відповіли на це повідомлення, тому я витягнув медіа до відкриття.',
         'edited_title': '✏️ <b>Повідомлення змінили</b>',
+        'edited_alert': '✏️ <b>Повідомлення змінили</b>\n\n💬 <b>Чат:</b> {chat}\n👤 <b>Автор:</b> {author}\n\n⬅️ <b>Було:</b>\n{old}\n\n➡️ <b>Стало:</b>\n{new}',
+        'keyword_alert': '🔎 <b>Сповіщення за ключовим словом</b>: {keywords}\n\n💬 <b>Чат:</b> {chat}\n👤 <b>Автор:</b> {author}\n\n{body}',
+        'scam_alert': '⚠️ <b>Можливий скам/фішинг</b>\n\n💬 <b>Чат:</b> {chat}\n👤 <b>Автор:</b> {author}\n\n{body}',
+        'alert_direct_media': '🔥 <b>Медіа одразу збережено</b>\n\n📎 <b>Тип:</b> {type}\n💾 <b>Розмір:</b> {size}\n\nЯ отримав це як звичайне повідомлення в боті, тому одразу зробив копію.',
+        'alert_direct_timer': '🔥 <b>Таймерове медіа збережено</b>\n\n📎 <b>Тип:</b> {type}',
         'from': 'Автор',
         'chat': 'Чат',
         'text': 'Текст',
@@ -65,6 +70,7 @@ TEXTS: dict[str, dict[str, str]] = {'uk': {'start': '🕵️ <b>VERTUU SPY BOT</
                            '\n'
                            'Я побачив факт видалення, але не встиг зберегти вміст. Так буває, якщо повідомлення було '
                            'старе або бот ще не мав доступу до цього чату.',
+        'deleted_no_content': '👁 <b>Повідомлення видалили</b>\n\n💬 <b>Чат:</b> {chat}\n\nЯ побачив факт видалення, але не встиг зберегти вміст. Так буває, якщо повідомлення було старе або бот ще не мав доступу до цього чату.',
         'free_limit': '🔒 <b>Free-ліміт на сьогодні вичерпано.</b>\n'
                       '\n'
                       'Оформи Pro, щоб бачити більше видалених повідомлень і історію редагувань без таких обмежень.',
@@ -157,6 +163,11 @@ TEXTS: dict[str, dict[str, str]] = {'uk': {'start': '🕵️ <b>VERTUU SPY BOT</
         'alert_media_backup': '🔥 <b>Медиа сохранено</b>\n\n💬 <b>Чат:</b> {chat}\n👤 <b>Автор:</b> {author}\n📎 <b>Тип:</b> {type}\n\nЯ сохранил это медиа сразу, поэтому таймеровые/исчезающие сообщения не потеряются.',
         'alert_timer_reply': '🔥 <b>Таймерное медиа — извлечено через ответ</b>\n\n💬 <b>Чат:</b> {chat}\n👤 <b>Автор:</b> {author}\n📎 <b>Тип:</b> {type}\n\nВы ответили на это сообщение, поэтому я смог извлечь медиа до открытия.',
         'edited_title': '✏️ <b>Сообщение изменили</b>',
+        'edited_alert': '✏️ <b>Сообщение изменили</b>\n\n💬 <b>Чат:</b> {chat}\n👤 <b>Автор:</b> {author}\n\n⬅️ <b>Было:</b>\n{old}\n\n➡️ <b>Стало:</b>\n{new}',
+        'keyword_alert': '🔎 <b>Оповещение по ключевому слову</b>: {keywords}\n\n💬 <b>Чат:</b> {chat}\n👤 <b>Автор:</b> {author}\n\n{body}',
+        'scam_alert': '⚠️ <b>Возможный скам/фишинг</b>\n\n💬 <b>Чат:</b> {chat}\n👤 <b>Автор:</b> {author}\n\n{body}',
+        'alert_direct_media': '🔥 <b>Медиа сразу сохранено</b>\n\n📎 <b>Тип:</b> {type}\n💾 <b>Размер:</b> {size}\n\nЯ получил это как обычное сообщение в боте, поэтому сразу сделал копию.',
+        'alert_direct_timer': '🔥 <b>Таймерное медиа сохранено</b>\n\n📎 <b>Тип:</b> {type}',
         'from': 'Автор',
         'chat': 'Чат',
         'text': 'Текст',
@@ -167,6 +178,7 @@ TEXTS: dict[str, dict[str, str]] = {'uk': {'start': '🕵️ <b>VERTUU SPY BOT</
                            '\n'
                            'Я увидел факт удаления, но не успел сохранить содержимое. Так бывает, если сообщение было '
                            'старое или бот ещё не имел доступа к этому чату.',
+        'deleted_no_content': '👁 <b>Сообщение удалили</b>\n\n💬 <b>Чат:</b> {chat}\n\nЯ увидел факт удаления, но не успел сохранить содержимое. Так бывает, если сообщение было старое или бот ещё не имел доступа к этому чату.',
         'free_limit': '🔒 <b>Free-лимит на сегодня исчерпан.</b>\n'
                       '\n'
                       'Оформи Pro, чтобы видеть больше удалённых сообщений и историю редактирований без таких '
@@ -260,6 +272,11 @@ TEXTS: dict[str, dict[str, str]] = {'uk': {'start': '🕵️ <b>VERTUU SPY BOT</
         'alert_media_backup': '🔥 <b>Media backup saved</b>\n\n💬 <b>Chat:</b> {chat}\n👤 <b>From:</b> {author}\n📎 <b>Type:</b> {type}\n\nI saved this media immediately, so timer/disappearing media will not be lost.',
         'alert_timer_reply': '🔥 <b>Timer media — extracted via reply</b>\n\n💬 <b>Chat:</b> {chat}\n👤 <b>From:</b> {author}\n📎 <b>Type:</b> {type}\n\nYou replied to this message, so I extracted the media before it was opened.',
         'edited_title': '✏️ <b>Message changed</b>',
+        'edited_alert': '✏️ <b>Message edited</b>\n\n💬 <b>Chat:</b> {chat}\n👤 <b>From:</b> {author}\n\n⬅️ <b>Before:</b>\n{old}\n\n➡️ <b>After:</b>\n{new}',
+        'keyword_alert': '🔎 <b>Keyword alert</b>: {keywords}\n\n💬 <b>Chat:</b> {chat}\n👤 <b>From:</b> {author}\n\n{body}',
+        'scam_alert': '⚠️ <b>Possible scam/phishing</b>\n\n💬 <b>Chat:</b> {chat}\n👤 <b>From:</b> {author}\n\n{body}',
+        'alert_direct_media': '🔥 <b>Media saved instantly</b>\n\n📎 <b>Type:</b> {type}\n💾 <b>Size:</b> {size}\n\nI received this as a direct bot message, so I backed it up immediately.',
+        'alert_direct_timer': '🔥 <b>Timer media saved</b>\n\n📎 <b>Type:</b> {type}',
         'from': 'Author',
         'chat': 'Chat',
         'text': 'Text',
@@ -270,6 +287,7 @@ TEXTS: dict[str, dict[str, str]] = {'uk': {'start': '🕵️ <b>VERTUU SPY BOT</
                            '\n'
                            'I detected a deletion but did not save the content. This can happen if the message was '
                            'old or the bot did not have access to this chat yet.',
+        'deleted_no_content': '👁 <b>Message deleted</b>\n\n💬 <b>Chat:</b> {chat}\n\nI detected a deletion but did not save the content. This can happen if the message was old or the bot did not have access to this chat yet.',
         'free_limit': '🔒 <b>Free daily limit reached.</b>\n'
                       '\n'
                       'Upgrade to Pro to see more deleted messages and edit history without these limits.',
