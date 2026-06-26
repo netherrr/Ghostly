@@ -53,7 +53,7 @@ from keyboards import (
 
 # Bump on every deploy. Shown in /edit and /health so it is obvious at a glance
 # whether the running bot actually has the latest code (i.e. Railway redeployed).
-BUILD = "2026-06-26 · admin-chat-v17"
+BUILD = "2026-06-26 · admin-chat-v18"
 
 
 def e(value: Any) -> str:

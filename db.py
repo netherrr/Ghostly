@@ -11,6 +11,12 @@ import asyncpg
 from config import Settings
 
 
+# Language a brand-new account starts in, independent of the DEFAULT_LANG env
+# var (which only controls generic fallbacks). New users always begin in
+# Russian and can switch later with the 🌐 language button.
+NEW_USER_LANG = "ru"
+
+
 def decode_json(value: Any, default: Any = None) -> Any:
     if value is None:
         return default
@@ -345,7 +351,7 @@ class Database:
                     ON CONFLICT(tg_id) DO UPDATE SET is_admin=TRUE, updated_at=NOW()
                     """,
                     admin_id,
-                    self.settings.default_lang,
+                    NEW_USER_LANG,
                 )
 
             # 2026 pricing model. Seven duration-based subscriptions with a single
@@ -1103,7 +1109,7 @@ Important: check the network before sending. If USDT is sent through the wrong n
                 first_name,
                 last_name,
                 lang,
-                self.settings.default_lang,
+                NEW_USER_LANG,
                 tg_id in self.settings.admin_ids,
                 is_premium,
             )
@@ -1152,7 +1158,7 @@ Important: check the network before sending. If USDT is sent through the wrong n
                 """,
                 tg_id,
                 until,
-                self.settings.default_lang,
+                NEW_USER_LANG,
             )
         return until
 
