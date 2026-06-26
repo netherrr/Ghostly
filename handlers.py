@@ -53,7 +53,7 @@ from keyboards import (
 
 # Bump on every deploy. Shown in /edit and /health so it is obvious at a glance
 # whether the running bot actually has the latest code (i.e. Railway redeployed).
-BUILD = "2026-06-26 · edit-legend-v6"
+BUILD = "2026-06-26 · edit-migrate-v7"
 
 
 def e(value: Any) -> str:
@@ -571,15 +571,70 @@ def dynamic_var_labels(base: str, lang: str) -> dict[str, str]:
     return dict(labels.get(lang) or labels.get("uk") or {})
 
 
-def dynamic_legend(base: str, lang: str) -> str:
-    """Build the `{placeholder} — what it means` legend shown during /edit."""
+def dynamic_legend(base: str, lang: str, only: list[str] | None = None) -> str:
+    """Build the `{placeholder} — what it means` legend shown during /edit.
+
+    When ``only`` is given, list just those placeholders (so the legend matches
+    exactly what is present in the text the admin is about to edit).
+    """
     labels = dynamic_var_labels(base, lang)
+    variables = only if only is not None else dynamic_required_vars(base)
     lines: list[str] = []
-    for var in dynamic_required_vars(base):
+    for var in variables:
         token = "{" + var + "}"
         desc = labels.get(var)
         lines.append(f"• <code>{e(token)}</code> — {e(desc)}" if desc else f"• <code>{e(token)}</code>")
     return "\n".join(lines)
+
+
+# Old saved templates may still bundle an emoji/label together with data inside a
+# single variable (e.g. {amount_uah_line} = "🇺🇦 …: 11 грн"). For editing we show
+# the decomposed form instead, so the emoji/label become editable and only the
+# number stays as data. This only rewrites the PREVIEW; the saved template is
+# untouched until the admin sends back new content.
+DYNAMIC_VAR_MIGRATIONS: dict[str, dict[str, dict[str, str]]] = {
+    "choose_payment": {
+        "amount_uah_line": {
+            "uk": "🇺🇦 До сплати: {amount_uah} грн",
+            "ru": "🇺🇦 К оплате: {amount_uah} грн",
+            "en": "🇺🇦 To pay: {amount_uah} UAH",
+        },
+    },
+    "payment_manual": {
+        "payment_amount_lines": {
+            "uk": "🇺🇦 До сплати: {amount_uah} грн\n💵 До сплати: ${amount_usd}",
+            "ru": "🇺🇦 К оплате: {amount_uah} грн\n💵 К оплате: ${amount_usd}",
+            "en": "🇺🇦 To pay: {amount_uah} UAH\n💵 To pay: ${amount_usd}",
+        },
+        "amount_uah_line": {
+            "uk": "🇺🇦 До сплати: {amount_uah} грн",
+            "ru": "🇺🇦 К оплате: {amount_uah} грн",
+            "en": "🇺🇦 To pay: {amount_uah} UAH",
+        },
+    },
+    "keywords": {
+        "keywords_hint": {
+            "uk": "📡 Групи на моніторингу:\n{monitored_groups}\n\nℹ️ Додай мене в групу (адміном) і надішли там /watch. Я напишу в особисті, коли зʼявляться твої слова. /unwatch — вимкнути.",
+            "ru": "📡 Группы на мониторинге:\n{monitored_groups}\n\nℹ️ Добавь меня в группу (админом) и отправь там /watch. Я напишу в личку, когда встретятся твои слова. /unwatch — выключить.",
+            "en": "📡 Monitored groups:\n{monitored_groups}\n\nℹ️ Add me to a group (as admin) and send /watch there. I'll DM you when your keywords appear. /unwatch to stop.",
+        },
+    },
+}
+
+
+def migrate_dynamic_text(base: str, text: str, lang: str) -> str:
+    """Rewrite old bundled placeholders into their editable decomposed form."""
+    text = text or ""
+    for old_var, langs in (DYNAMIC_VAR_MIGRATIONS.get(base) or {}).items():
+        token = "{" + old_var + "}"
+        if token in text:
+            text = text.replace(token, langs.get(lang) or langs.get("uk") or "")
+    return text
+
+
+def present_dynamic_vars(base: str, text: str) -> list[str]:
+    """Declared data placeholders that actually appear in this text."""
+    return [v for v in dynamic_required_vars(base) if ("{" + v + "}") in (text or "")]
 
 
 def missing_dynamic_vars(base: str, text: str) -> list[str]:
@@ -1556,8 +1611,12 @@ class BotHandlers:
                     editable = state_prompt(lang, "manual_payment_proof", {})
                 if is_dynamic_template_key(template_key):
                     base = template_base(template_key)
-                    editable = str((current_tpl or {}).get("text") or dynamic_template_default(base, lang))
-                    legend = dynamic_legend(base, lang)
+                    raw = str((current_tpl or {}).get("text") or dynamic_template_default(base, lang))
+                    # Show old saved templates in the modern decomposed form so the
+                    # emoji/labels that used to be locked in a value become editable.
+                    editable = migrate_dynamic_text(base, raw, lang)
+                    present = present_dynamic_vars(base, editable)
+                    legend = dynamic_legend(base, lang, only=present)
                     extra += (
                         "\n\n🎨 <b>Редагуй будь-який текст і емодзі</b> (зокрема Premium emoji) — як хочеш."
                     )
