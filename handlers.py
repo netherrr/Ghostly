@@ -53,7 +53,7 @@ from keyboards import (
 
 # Bump on every deploy. Shown in /edit and /health so it is obvious at a glance
 # whether the running bot actually has the latest code (i.e. Railway redeployed).
-BUILD = "2026-06-26 · admin-chat-v15"
+BUILD = "2026-06-26 · admin-chat-v16"
 
 
 def e(value: Any) -> str:
@@ -2633,9 +2633,9 @@ class BotHandlers:
         elif data.startswith("manual_paid:"):
             await self.callback_manual_paid(tg_id, lang, int(data.split(":", 1)[1]))
         elif data.startswith("admin_approve:"):
-            await self.admin_approve_callback(tg_id, lang, int(data.split(":", 1)[1]), approved=True)
+            await self.admin_approve_callback(tg_id, lang, int(data.split(":", 1)[1]), approved=True, edit=edit, msg=msg)
         elif data.startswith("admin_reject:"):
-            await self.admin_approve_callback(tg_id, lang, int(data.split(":", 1)[1]), approved=False)
+            await self.admin_approve_callback(tg_id, lang, int(data.split(":", 1)[1]), approved=False, edit=edit, msg=msg)
         elif data == "admin":
             await self.show_admin(tg_id, lang, edit)
         elif data.startswith("admin_") or data.startswith("adm_") or data.startswith("bc_") or data.startswith("ub_"):
@@ -3053,24 +3053,64 @@ class BotHandlers:
         await self.db.clear_state(tg_id)
         await self.bot.send_message(tg_id, f"✅ Відео-інструкцію для зникаючих повідомлень збережено. Тип: <code>{e(proof['kind'])}</code>", admin_settings_keyboard(lang))
 
-    async def admin_approve_callback(self, admin_id: int, lang: str, payment_id: int, approved: bool) -> None:
+    async def _resolve_admin_payment_message(
+        self, edit: tuple[int, int] | None, msg: dict[str, Any] | None, status: str
+    ) -> None:
+        """Append a status line to the admin payment message and drop its buttons.
+
+        The original notification in the chat is edited in place (caption for a
+        media/screenshot message, text otherwise), so the chat itself shows
+        ✅/❌ instead of sending a separate message to the admin who pressed it.
+        """
+        if not edit:
+            return
+        msg = msg or {}
+        chat_id, message_id = edit
+        is_media = any(msg.get(k) for k in ("photo", "video", "animation", "document", "audio", "voice"))
+        original = (msg.get("caption") if is_media else msg.get("text")) or ""
+        ents = (msg.get("caption_entities") if is_media else msg.get("entities")) or []
+        new_text = f"{original}\n\n{status}".strip()
+        try:
+            if is_media:
+                await self.bot.edit_message_caption(chat_id, message_id, new_text, caption_entities=ents)
+            else:
+                await self.bot.edit_message_text(chat_id, message_id, new_text, entities=ents)
+        except Exception as exc:
+            print("update admin payment message failed:", repr(exc), flush=True)
+            # At least strip the buttons so the action cannot be repeated.
+            try:
+                await self.bot.request("editMessageReplyMarkup", {"chat_id": chat_id, "message_id": message_id})
+            except Exception:
+                pass
+
+    async def admin_approve_callback(
+        self,
+        admin_id: int,
+        lang: str,
+        payment_id: int,
+        approved: bool,
+        edit: tuple[int, int] | None = None,
+        msg: dict[str, Any] | None = None,
+    ) -> None:
         if not await self.db.is_admin(admin_id):
-            await self.bot.send_message(admin_id, tr(lang, "not_admin"))
             return
         payment = await self.db.get_payment(payment_id)
         if not payment:
-            await self.bot.send_message(admin_id, "Payment not found")
+            await self._resolve_admin_payment_message(edit, msg, "⚠️ Заявку не знайдено.")
             return
         user_id = int(payment["user_id"])
         user_lang = await self.user_lang(user_id)
         if approved:
             paid = await self.db.mark_payment_paid(payment_id, admin_id=admin_id)
-            await self.bot.send_message(admin_id, f"✅ Payment {payment_id} approved. Access until {dt(paid.get('paid_until') if paid else None)}", admin_menu(lang))
-            await self.editable_send(user_id, "crypto_paid", user_lang, {"date": dt(paid.get("paid_until") if paid else None)}, main_menu(user_lang, False))
+            until = dt(paid.get("paid_until") if paid else None)
+            # Status is plain text: the original caption keeps its formatting via
+            # entities, and Telegram does not parse HTML when entities are sent.
+            await self._resolve_admin_payment_message(edit, msg, f"✅ ПІДТВЕРДЖЕНО · доступ до {until}")
+            await self.editable_send(user_id, "crypto_paid", user_lang, {"date": until}, main_menu(user_lang, False))
         else:
             await self.db.mark_payment_status(payment_id, "rejected", admin_id=admin_id)
-            await self.bot.send_message(admin_id, f"❌ Payment {payment_id} rejected.", admin_menu(lang))
-            await self.bot.send_message(user_id, "❌ Payment rejected / Оплату відхилено / Оплата отклонена.")
+            await self._resolve_admin_payment_message(edit, msg, "❌ ВІДХИЛЕНО")
+            await self.bot.send_message(user_id, "❌ Оплату відхилено / Payment rejected / Оплата отклонена.")
 
     async def handle_admin_callback(self, tg_id: int, lang: str, data: str, edit: tuple[int, int] | None) -> None:
         if not await self.db.is_admin(tg_id):
