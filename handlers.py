@@ -53,7 +53,7 @@ from keyboards import (
 
 # Bump on every deploy. Shown in /edit and /health so it is obvious at a glance
 # whether the running bot actually has the latest code (i.e. Railway redeployed).
-BUILD = "2026-06-26 · edit-resolve-v10"
+BUILD = "2026-06-26 · edit-unbake-v11"
 
 
 def e(value: Any) -> str:
@@ -1676,6 +1676,14 @@ class BotHandlers:
                     # Show old saved templates in the modern decomposed form so the
                     # emoji/labels that used to be locked in a value become editable.
                     editable = migrate_dynamic_text(base, raw, lang)
+                    # If the admin previously baked a live value into the saved
+                    # text (e.g. copied the rendered access date / TON address),
+                    # turn it back into its {placeholder} so it auto-updates again.
+                    for var, val in (await self.live_values_for_edit(base, lang, tg_id, target)).items():
+                        val = str(val or "")
+                        token = "{" + var + "}"
+                        if len(val) >= 6 and val in editable and token not in editable:
+                            editable = editable.replace(val, token)
                     legend = dynamic_legend(base, lang)
                     extra += (
                         "\n\n🎨 <b>Редагуй будь-який текст і емодзі</b> (зокрема Premium emoji) — як хочеш."
@@ -2676,6 +2684,32 @@ class BotHandlers:
             await self.send_template_content(tg_id, rendered, ents, media, keyboard, track_key=key)
         else:
             await self._send_or_edit(tg_id, rendered, keyboard, edit, entities=ents, track_key=key)
+
+    async def live_values_for_edit(
+        self, base: str, lang: str, tg_id: int, target: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Current live values for a dynamic screen, used to turn baked-in text
+        back into {placeholders} in the /edit preview."""
+        out: dict[str, Any] = {}
+        try:
+            if base == "plans":
+                user = await self.db.get_user(tg_id)
+                out["plans_list"] = html_to_plain(self.access_status_line(user, lang))
+            elif base == "payment_manual":
+                cb = first_callback_with_prefix(target.get("reply_markup"), "manual_paid:")
+                if cb:
+                    payment = await self.db.get_payment(int(cb.split(":", 1)[1]))
+                    if payment:
+                        method = await self.db.get_payment_method(str(payment.get("provider") or ""))
+                        if method:
+                            out["instructions"] = method_instructions(method, lang)
+                        if payment.get("plan_id"):
+                            plan = await self.db.get_plan(payment.get("plan_id"))
+                            if plan:
+                                out["plan_name"] = plan_name(plan, lang)
+        except Exception as exc:
+            print("live_values_for_edit failed:", base, repr(exc), flush=True)
+        return out
 
     async def editable_send(
         self,
