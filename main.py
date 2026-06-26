@@ -12,7 +12,7 @@ from bot_api import BotAPI
 from config import load_settings
 from crypto_pay import CryptoPayClient
 from db import Database
-from handlers import BotHandlers
+from handlers import BotHandlers, BUILD
 
 settings = load_settings()
 db = Database(settings)
@@ -80,7 +80,7 @@ app = FastAPI(title=settings.app_name, lifespan=lifespan)
 
 @app.get("/health")
 async def health() -> dict[str, Any]:
-    return {"ok": True, "app": settings.app_name}
+    return {"ok": True, "app": settings.app_name, "build": BUILD}
 
 
 @app.get("/", response_class=HTMLResponse)
