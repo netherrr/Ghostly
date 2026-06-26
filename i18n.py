@@ -39,6 +39,8 @@ TEXTS: dict[str, dict[str, str]] = {'uk': {'start': '🕵️ <b>VERTUU SPY BOT</
         'paid_wait_admin': '✅ Дякую, квитанцію отримано.\n'
                            '\n'
                            'Заявку вже відправлено адміну. Доступ активують після перевірки оплати.',
+        'invoice_stars_support': '⭐ <b>Рахунок створено.</b>\n\nДо відправки: <b>{stars} ⭐</b>\nПісля підтвердження зірки зарахуються на баланс бота.',
+        'invoice_stars_plan': '⭐ <b>Рахунок у Telegram Stars створено.</b>\n\nДо сплати: <b>{stars} ⭐</b>\nПісля підтвердження доступ активується автоматично.',
         'crypto_paid': '✅ Оплату підтверджено.\n'
                        '\n'
                        'Підписка активна до: <b>{date}</b>\n'
@@ -134,6 +136,8 @@ TEXTS: dict[str, dict[str, str]] = {'uk': {'start': '🕵️ <b>VERTUU SPY BOT</
         'paid_wait_admin': '✅ Спасибо, квитанция получена.\n'
                            '\n'
                            'Заявка уже отправлена админу. Доступ активируют после проверки оплаты.',
+        'invoice_stars_support': '⭐ <b>Счёт создан.</b>\n\nК отправке: <b>{stars} ⭐</b>\nПосле подтверждения звёзды зачислятся на баланс бота.',
+        'invoice_stars_plan': '⭐ <b>Счёт в Telegram Stars создан.</b>\n\nК оплате: <b>{stars} ⭐</b>\nПосле подтверждения доступ активируется автоматически.',
         'crypto_paid': '✅ Оплата подтверждена.\n'
                        '\n'
                        'Подписка активна до: <b>{date}</b>\n'
@@ -230,6 +234,8 @@ TEXTS: dict[str, dict[str, str]] = {'uk': {'start': '🕵️ <b>VERTUU SPY BOT</
         'paid_wait_admin': '✅ Thank you, receipt received.\n'
                            '\n'
                            'The request has been sent to admin. Access will be activated after verification.',
+        'invoice_stars_support': '⭐ <b>Invoice created.</b>\n\nTo send: <b>{stars} ⭐</b>\nAfter confirmation, Stars will be added to the bot balance.',
+        'invoice_stars_plan': '⭐ <b>Telegram Stars invoice created.</b>\n\nTo pay: <b>{stars} ⭐</b>\nAccess activates automatically after confirmation.',
         'crypto_paid': '✅ Payment confirmed.\n'
                        '\n'
                        'Subscription active until: <b>{date}</b>\n'
@@ -373,6 +379,24 @@ def tr(lang: str | None, key: str, **kwargs: object) -> str:
     lang = lang if lang in SUPPORTED_LANGS else 'ru'
     value = TEXTS[lang].get(key, TEXTS['ru'].get(key, key))
     return value.format(**kwargs)
+
+
+def tr_template(lang: str | None, key: str) -> str:
+    """Raw message text for `key` with its {placeholders} intact (not formatted).
+
+    Used by the editable-message layer so /edit can show the placeholders that
+    the bot fills with live data.
+    """
+    lang = lang if lang in SUPPORTED_LANGS else 'ru'
+    return TEXTS[lang].get(key) or TEXTS['ru'].get(key) or key
+
+
+def tr_keys() -> list[str]:
+    """All known message keys (union across languages)."""
+    keys: set[str] = set()
+    for table in TEXTS.values():
+        keys.update(table.keys())
+    return sorted(keys)
 
 
 def btn(lang: str | None, key: str) -> str:

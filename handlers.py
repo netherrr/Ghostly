@@ -19,7 +19,7 @@ from bot_api import BotAPI
 from config import Settings
 from crypto_pay import CryptoPayClient
 from db import Database, display_name, decode_json, extract_message_content, extract_file_metadata
-from i18n import btn, tr
+from i18n import btn, tr, tr_template
 from keyboards import (
     admin_menu,
     admin_method_keyboard,
@@ -53,7 +53,7 @@ from keyboards import (
 
 # Bump on every deploy. Shown in /edit and /health so it is obvious at a glance
 # whether the running bot actually has the latest code (i.e. Railway redeployed).
-BUILD = "2026-06-26 · edit-unified-v8"
+BUILD = "2026-06-26 · edit-everything-v9"
 
 
 def e(value: Any) -> str:
@@ -532,6 +532,44 @@ DYNAMIC_TEMPLATE_SPECS = {
         },
     },
 }
+
+
+# Human-readable descriptions for the {placeholders} of one-off (tr) messages,
+# shown in the /edit legend. Sparse on purpose — any placeholder without a
+# description is still listed, just without an explanation.
+MESSAGE_LABELS: dict[str, dict[str, str]] = {
+    "stars": {"uk": "кількість зірок", "ru": "количество звёзд", "en": "number of Stars"},
+    "days": {"uk": "кількість днів", "ru": "количество дней", "en": "number of days"},
+    "date": {"uk": "дата", "ru": "дата", "en": "date"},
+    "amount": {"uk": "сума", "ru": "сумма", "en": "amount"},
+    "url": {"uk": "посилання на оплату", "ru": "ссылка на оплату", "en": "payment link"},
+    "app": {"uk": "назва бота", "ru": "название бота", "en": "bot name"},
+    "bot_username": {"uk": "юзернейм бота", "ru": "юзернейм бота", "en": "bot username"},
+    "plan": {"uk": "назва тарифу", "ru": "название тарифа", "en": "plan name"},
+    "price": {"uk": "ціна", "ru": "цена", "en": "price"},
+}
+
+
+def message_legend(lang: str, variables: list[str]) -> str:
+    """`{placeholder} — meaning` legend for a one-off message's placeholders."""
+    lines: list[str] = []
+    for var in dict.fromkeys(variables):  # de-dupe, keep order
+        token = "{" + var + "}"
+        desc = (MESSAGE_LABELS.get(var) or {}).get(lang) or (MESSAGE_LABELS.get(var) or {}).get("uk")
+        lines.append(f"• <code>{e(token)}</code> — {e(desc)}" if desc else f"• <code>{e(token)}</code>")
+    return "\n".join(lines)
+
+
+def message_key_to_tr(template_key: str) -> str:
+    """`msg_<trkey>_<lang>` -> `<trkey>`."""
+    raw = str(template_key)
+    if raw.startswith("msg_"):
+        raw = raw[len("msg_"):]
+    for suffix in ("_uk", "_ru", "_en"):
+        if raw.endswith(suffix):
+            raw = raw[: -len(suffix)]
+            break
+    return raw
 
 
 def template_base(key: str | None) -> str:
@@ -1609,7 +1647,22 @@ class BotHandlers:
                     editable = state_prompt(lang, "keyword_add", {})
                 if not editable and str(template_key).startswith("prompt_manual_payment_proof_"):
                     editable = state_prompt(lang, "manual_payment_proof", {})
-                if is_dynamic_template_key(template_key):
+                if str(template_key).startswith("msg_"):
+                    trkey = message_key_to_tr(template_key)
+                    raw = str((current_tpl or {}).get("text") or strip_visible_html_tags(tr_template(lang, trkey)))
+                    editable = raw
+                    msg_vars = re.findall(r"\{(\w+)\}", raw)
+                    extra += (
+                        "\n\n🎨 <b>Редагуй будь-який текст і емодзі</b> (зокрема Premium emoji) — як хочеш."
+                    )
+                    if msg_vars:
+                        extra += (
+                            "\n\n📊 <b>Змінні в {дужках} — бот підставляє сам.</b> Лиши їх, де треба авто-дані:\n"
+                            f"{message_legend(lang, msg_vars)}"
+                        )
+                    else:
+                        extra += "\n\nℹ️ У цьому повідомленні немає змінних — можеш переписати його повністю."
+                elif is_dynamic_template_key(template_key):
                     base = template_base(template_key)
                     raw = str((current_tpl or {}).get("text") or dynamic_template_default(base, lang))
                     # Show old saved templates in the modern decomposed form so the
@@ -1903,7 +1956,7 @@ class BotHandlers:
         try:
             granted = await self.db.grant_trial_if_new(tg_id)
             if granted:
-                await self.bot.send_message(tg_id, tr(lang, "trial_granted", days=granted))
+                await self.editable_send(tg_id, "trial_granted", lang, {"days": granted})
         except Exception as exc:
             print("Trial grant error:", repr(exc), flush=True)
         key = f"start_{lang}"
@@ -1915,21 +1968,21 @@ class BotHandlers:
             await self.track_sent(result, tg_id, key)
         # If the trial/subscription has lapsed, gently prompt to subscribe.
         if not is_admin and not await self.db.active_subscription(tg_id):
-            await self.bot.send_message(tg_id, tr(lang, "access_locked"), plans_keyboard(lang, await self.db.plans(True)))
+            await self.editable_send(tg_id, "access_locked", lang, keyboard=plans_keyboard(lang, await self.db.plans(True)))
 
     async def notify_referral_result(self, referrer_id: int, result: dict[str, Any]) -> None:
         """Tell the referrer they earned bonus days (or hit the normal limit)."""
         try:
             lang = await self.user_lang(referrer_id)
             if result.get("kind") == "premium":
-                text = tr(lang, "ref_earned_premium", days=result.get("bonus_days", 0))
+                key, values = "ref_earned_premium", {"days": result.get("bonus_days", 0)}
             elif result.get("limit_reached"):
-                text = tr(lang, "ref_limit_reached")
+                key, values = "ref_limit_reached", {}
             elif result.get("bonus_days"):
-                text = tr(lang, "ref_earned_normal", days=result.get("bonus_days", 0))
+                key, values = "ref_earned_normal", {"days": result.get("bonus_days", 0)}
             else:
                 return
-            await self.safe_send(referrer_id, text)
+            await self.editable_send(referrer_id, key, lang, values)
         except Exception as exc:
             print("notify_referral_result error:", repr(exc), flush=True)
 
@@ -2014,14 +2067,7 @@ class BotHandlers:
             "Telegram Stars project support. This does not activate a subscription."
         )
         await self.bot.send_stars_invoice(tg_id, title, desc, payload, stars)
-        hint = (
-            f"⭐ <b>Рахунок створено.</b>\n\nДо відправки: <b>{stars} ⭐</b>\nПісля підтвердження зірки зарахуються на баланс бота."
-            if lang == "uk" else
-            f"⭐ <b>Счёт создан.</b>\n\nК отправке: <b>{stars} ⭐</b>\nПосле подтверждения звёзды зачислятся на баланс бота."
-            if lang == "ru" else
-            f"⭐ <b>Invoice created.</b>\n\nTo send: <b>{stars} ⭐</b>\nAfter confirmation, Stars will be added to the bot balance."
-        )
-        await self.bot.send_message(tg_id, hint, back_menu(lang, "support"))
+        await self.editable_send(tg_id, "invoice_stars_support", lang, {"stars": stars}, back_menu(lang, "support"))
 
 
     async def show_menu_screen(self, tg_id: int, lang: str, is_admin: bool, edit: tuple[int, int] | None = None) -> None:
@@ -2618,6 +2664,46 @@ class BotHandlers:
         else:
             await self._send_or_edit(tg_id, rendered, keyboard, edit, entities=ents, track_key=key)
 
+    async def editable_send(
+        self,
+        tg_id: int,
+        key: str,
+        lang: str,
+        values: dict[str, Any] | None = None,
+        keyboard: dict[str, Any] | None = None,
+    ) -> dict[str, Any] | None:
+        """Send a one-off bot message that the admin can edit forever via /edit.
+
+        Any message routed through here becomes a saved template under
+        ``msg_<key>_<lang>``: an admin override (text + Premium-emoji entities +
+        optional media) is used if present, otherwise the built-in i18n text.
+        Dynamic data is passed as ``values`` and substituted into {placeholders},
+        so it stays live. The sent message is recorded so reply -> /edit resolves
+        exactly this message.
+        """
+        values = values or {}
+        tkey = f"msg_{key}_{lang}"
+        tpl = await self.db.get_template(tkey)
+        try:
+            if tpl:
+                rendered, ents = render_dynamic_template(
+                    str(tpl.get("text") or ""), tpl.get("entities") or [], values
+                )
+                media = tpl.get("media")
+                if media:
+                    await self.send_template_content(tg_id, rendered, ents, media, keyboard, track_key=tkey)
+                    return None
+                result = await self.bot.send_message(tg_id, rendered, keyboard, entities=ents)
+            else:
+                # Default i18n text uses HTML, so escape the live values for it.
+                text = tr(lang, key, **{k: e(v) for k, v in values.items()})
+                result = await self.bot.send_message(tg_id, text, keyboard)
+            await self.track_sent(result, tg_id, tkey)
+            return result
+        except Exception as exc:
+            print("editable_send failed:", key, repr(exc), flush=True)
+            return None
+
     async def callback_buy(self, tg_id: int, lang: str, plan_id: int, edit: tuple[int, int] | None) -> None:
         plan = await self.db.get_plan(plan_id)
         if not plan or not plan.get("is_active"):
@@ -2660,17 +2746,10 @@ class BotHandlers:
                     else "Your subscription activates automatically after paying with Stars."
                 )
                 await self.bot.send_stars_invoice(tg_id, title, desc, payload, stars)
-                hint = (
-                    f"⭐ <b>Рахунок у Telegram Stars створено.</b>\n\nДо сплати: <b>{stars} ⭐</b>\nПісля підтвердження доступ активується автоматично."
-                    if lang == "uk" else
-                    f"⭐ <b>Счёт в Telegram Stars создан.</b>\n\nК оплате: <b>{stars} ⭐</b>\nПосле подтверждения доступ активируется автоматически."
-                    if lang == "ru" else
-                    f"⭐ <b>Telegram Stars invoice created.</b>\n\nTo pay: <b>{stars} ⭐</b>\nAccess activates automatically after confirmation."
-                )
-                await self.bot.send_message(tg_id, hint, back_menu(lang, "plans"))
+                await self.editable_send(tg_id, "invoice_stars_plan", lang, {"stars": stars}, back_menu(lang, "plans"))
             except Exception as exc:
                 print("Stars payment error:", repr(exc))
-                await self.bot.send_message(tg_id, tr(lang, "payment_error"), back_menu(lang))
+                await self.editable_send(tg_id, "payment_error", lang, keyboard=back_menu(lang))
             return
 
         if method_code == "cryptobot":
@@ -2683,7 +2762,7 @@ class BotHandlers:
                 await self._send_or_edit(tg_id, text, crypto_payment_keyboard(lang, int(payment["id"]), url or "https://t.me/CryptoBot"), edit)
             except Exception as exc:
                 print("Crypto payment error:", repr(exc))
-                await self.bot.send_message(tg_id, tr(lang, "payment_error"), back_menu(lang))
+                await self.editable_send(tg_id, "payment_error", lang, keyboard=back_menu(lang))
             return
 
         raw_payment = {"method": method_code}
@@ -2711,21 +2790,21 @@ class BotHandlers:
     async def callback_check_crypto(self, tg_id: int, lang: str, payment_id: int, edit: tuple[int, int] | None) -> None:
         payment = await self.db.get_payment(payment_id)
         if not payment or int(payment["user_id"]) != tg_id or payment["provider"] != "cryptobot":
-            await self.bot.send_message(tg_id, tr(lang, "payment_error"))
+            await self.editable_send(tg_id, "payment_error", lang)
             return
         if payment["status"] == "paid":
-            await self.bot.send_message(tg_id, tr(lang, "crypto_paid", date=dt(payment.get("paid_until") or (await self.db.get_user(tg_id) or {}).get("subscription_until"))))
+            await self.editable_send(tg_id, "crypto_paid", lang, {"date": dt(payment.get("paid_until") or (await self.db.get_user(tg_id) or {}).get("subscription_until"))})
             return
         try:
             invoice = await self.crypto.get_invoice(str(payment["external_id"]))
             if invoice and invoice.get("status") == "paid":
                 paid = await self.db.mark_payment_paid(payment_id, raw=invoice)
-                await self.bot.send_message(tg_id, tr(lang, "crypto_paid", date=dt(paid.get("paid_until") if paid else None)), main_menu(lang, await self.db.is_admin(tg_id)))
+                await self.editable_send(tg_id, "crypto_paid", lang, {"date": dt(paid.get("paid_until") if paid else None)}, main_menu(lang, await self.db.is_admin(tg_id)))
             else:
-                await self.bot.send_message(tg_id, tr(lang, "crypto_not_paid"), crypto_payment_keyboard(lang, payment_id, payment.get("invoice_url") or "https://t.me/CryptoBot"))
+                await self.editable_send(tg_id, "crypto_not_paid", lang, keyboard=crypto_payment_keyboard(lang, payment_id, payment.get("invoice_url") or "https://t.me/CryptoBot"))
         except Exception as exc:
             print("Crypto check error:", repr(exc))
-            await self.bot.send_message(tg_id, tr(lang, "payment_error"), back_menu(lang))
+            await self.editable_send(tg_id, "payment_error", lang, keyboard=back_menu(lang))
 
     async def handle_pre_checkout_query(self, query: dict[str, Any]) -> None:
         query_id = str(query.get("id") or "")
@@ -2753,7 +2832,7 @@ class BotHandlers:
             return
         payment = await self.db.get_payment_by_external_id(payload)
         if not payment:
-            await self.bot.send_message(tg_id, tr(lang, "payment_error"), back_menu(lang))
+            await self.editable_send(tg_id, "payment_error", lang, keyboard=back_menu(lang))
             return
         raw = decode_json(payment.get("raw"), {}) or {}
         if not isinstance(raw, dict):
@@ -2801,7 +2880,7 @@ class BotHandlers:
     async def callback_manual_paid(self, tg_id: int, lang: str, payment_id: int) -> None:
         payment = await self.db.get_payment(payment_id)
         if not payment or int(payment["user_id"]) != tg_id:
-            await self.bot.send_message(tg_id, tr(lang, "payment_error"))
+            await self.editable_send(tg_id, "payment_error", lang)
             return
         await self.db.set_state(tg_id, "manual_payment_proof", {"payment_id": payment_id})
         key = f"prompt_manual_payment_proof_{lang}"
@@ -2844,7 +2923,7 @@ class BotHandlers:
         payment = await self.db.get_payment(payment_id)
         if not payment or int(payment.get("user_id") or 0) != tg_id:
             await self.db.clear_state(tg_id)
-            await self.bot.send_message(tg_id, tr(lang, "payment_error"), main_menu(lang, is_admin))
+            await self.editable_send(tg_id, "payment_error", lang, keyboard=main_menu(lang, is_admin))
             return
         proof = extract_message_attachment(msg)
         proof.update({
@@ -2855,7 +2934,7 @@ class BotHandlers:
         })
         await self.db.add_payment_proof(payment_id, proof)
         await self.db.clear_state(tg_id)
-        await self.bot.send_message(tg_id, tr(lang, "paid_wait_admin"), main_menu(lang, is_admin))
+        await self.editable_send(tg_id, "paid_wait_admin", lang, keyboard=main_menu(lang, is_admin))
         await self.notify_admin_payment(payment_id)
 
     async def handle_admin_upload_connect_video(self, tg_id: int, lang: str, msg: dict[str, Any], state_row: dict[str, Any]) -> None:
