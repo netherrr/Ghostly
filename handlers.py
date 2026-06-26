@@ -433,19 +433,24 @@ DYNAMIC_TEMPLATE_SPECS = {
         },
     },
     "choose_payment": {
-        "vars": ["plan_name", "amount_usd", "amount_uah_line"],
+        # The flag/label are inlined into the template so they can be edited
+        # (e.g. swapped for a Premium emoji); only the numbers stay as variables.
+        # The UAH line disappears automatically when there is no UAH amount.
+        "vars": ["plan_name", "amount_usd", "amount_uah"],
         "default": {
-            "uk": "💳 Оплата тарифу\n\nТариф: {plan_name}\nСума: ${amount_usd}\n{amount_uah_line}\n\nОбери спосіб оплати:",
-            "ru": "💳 Оплата тарифа\n\nТариф: {plan_name}\nСумма: ${amount_usd}\n{amount_uah_line}\n\nВыбери способ оплаты:",
-            "en": "💳 Plan payment\n\nPlan: {plan_name}\nAmount: ${amount_usd}\n{amount_uah_line}\n\nChoose payment method:",
+            "uk": "💳 Оплата тарифу\n\nТариф: {plan_name}\nСума: ${amount_usd}\n🇺🇦 До сплати: {amount_uah} грн\n\nОбери спосіб оплати:",
+            "ru": "💳 Оплата тарифа\n\nТариф: {plan_name}\nСумма: ${amount_usd}\n🇺🇦 К оплате: {amount_uah} грн\n\nВыбери способ оплаты:",
+            "en": "💳 Plan payment\n\nPlan: {plan_name}\nAmount: ${amount_usd}\n🇺🇦 To pay: {amount_uah} UAH\n\nChoose payment method:",
         },
     },
     "payment_manual": {
-        "vars": ["plan_name", "payment_amount_lines", "instructions"],
+        # Same idea: flags/labels live in the editable template, numbers stay in
+        # variables. The UAH line is shown only for UAH card payments.
+        "vars": ["plan_name", "amount_uah", "amount_usd", "instructions"],
         "default": {
-            "uk": "💳 Ручна оплата\n\n💎 Тариф: {plan_name}\n{payment_amount_lines}\n\n{instructions}\n\nПісля оплати натисни «Я оплатив» і надішли скрін/квитанцію.",
-            "ru": "💳 Ручная оплата\n\n💎 Тариф: {plan_name}\n{payment_amount_lines}\n\n{instructions}\n\nПосле оплаты нажми «Я оплатил» и отправь скрин/квитанцию.",
-            "en": "💳 Manual payment\n\n💎 Plan: {plan_name}\n{payment_amount_lines}\n\n{instructions}\n\nAfter payment, press “I paid” and send a receipt/screenshot.",
+            "uk": "💳 Ручна оплата\n\n💎 Тариф: {plan_name}\n🇺🇦 До сплати: {amount_uah} грн\n💵 До сплати: ${amount_usd}\n\n{instructions}\n\nПісля оплати натисни «Я оплатив» і надішли скрін/квитанцію.",
+            "ru": "💳 Ручная оплата\n\n💎 Тариф: {plan_name}\n🇺🇦 К оплате: {amount_uah} грн\n💵 К оплате: ${amount_usd}\n\n{instructions}\n\nПосле оплаты нажми «Я оплатил» и отправь скрин/квитанцию.",
+            "en": "💳 Manual payment\n\n💎 Plan: {plan_name}\n🇺🇦 To pay: {amount_uah} UAH\n💵 To pay: ${amount_usd}\n\n{instructions}\n\nAfter payment, press “I paid” and send a receipt/screenshot.",
         },
     },
 }
@@ -502,6 +507,67 @@ def html_to_plain(value: Any) -> str:
     return html.unescape(text)
 
 
+def _drop_empty_optional_lines(
+    source: str, entities: list[dict[str, Any]], values: dict[str, str]
+) -> tuple[str, list[dict[str, Any]]]:
+    """Remove template lines whose only data variables resolve to empty.
+
+    This lets a default template inline a label/emoji on an optional line — e.g.
+    ``🇺🇦 До сплати: {amount_uah} грн`` — and have the whole line disappear when
+    there is no value. So the flag/emoji stays editable inside the template while
+    the line itself is still conditional. Telegram entity offsets are kept valid:
+    entities that overlap a removed line are dropped, the rest are shifted.
+    """
+    if not source or "{" not in source:
+        return source, entities
+    parts: list[str] = []
+    removed: list[tuple[int, int]] = []  # (utf16_start, utf16_len) of removed text
+    utf = 0
+    lines = source.split("\n")
+    last = len(lines) - 1
+    for i, line in enumerate(lines):
+        has_nl = i < last
+        line_utf = utf16_len(line)
+        tokens = [t for t in re.findall(r"\{([a-zA-Z0-9_]+)\}", line) if t in values]
+        drop = bool(tokens) and all(not str(values.get(t) or "").strip() for t in tokens)
+        if drop:
+            if has_nl:
+                removed.append((utf, line_utf + 1))  # line + trailing newline
+            elif parts and parts[-1].endswith("\n"):
+                # Last line: also remove the newline emitted by the previous line.
+                removed.append((utf - 1, line_utf + 1))
+                parts[-1] = parts[-1][:-1]
+            else:
+                removed.append((utf, line_utf))
+        else:
+            parts.append(line + ("\n" if has_nl else ""))
+        utf += line_utf + (1 if has_nl else 0)
+    if not removed:
+        return source, entities
+    new_source = "".join(parts)
+
+    def removed_before(off: int) -> int:
+        return sum(rl for rs, rl in removed if rs + rl <= off)
+
+    def overlaps(off: int, length: int) -> bool:
+        end = off + length
+        return any(not (end <= rs or off >= rs + rl) for rs, rl in removed)
+
+    new_entities: list[dict[str, Any]] = []
+    for ent in entities:
+        try:
+            off = int(ent.get("offset", 0))
+            length = int(ent.get("length", 0))
+        except Exception:
+            continue
+        if overlaps(off, length):
+            continue
+        ne = dict(ent)
+        ne["offset"] = off - removed_before(off)
+        new_entities.append(ne)
+    return new_source, new_entities
+
+
 def render_dynamic_template(text: str, entities: list[dict[str, Any]] | None, values: dict[str, str]) -> tuple[str, list[dict[str, Any]]]:
     """Replace {variables} and keep Telegram entity offsets valid.
 
@@ -511,7 +577,10 @@ def render_dynamic_template(text: str, entities: list[dict[str, Any]] | None, va
     """
     values = {k: html_to_plain(v) for k, v in (values or {}).items()}
     entities = [dict(x) for x in (entities or []) if isinstance(x, dict)]
-    source = text or ""
+    # Optional lines (their only variables are empty) are removed first, so an
+    # inline emoji/label on such a line stays editable yet only shows when there
+    # is data to display.
+    source, entities = _drop_empty_optional_lines(text or "", entities, values)
     repls: list[tuple[int, int, int]] = []
     for m in re.finditer(r"\{([a-zA-Z0-9_]+)\}", source):
         name = m.group(1)
@@ -2466,6 +2535,8 @@ class BotHandlers:
         values = {
             "plan_name": plan_name(plan, lang),
             "amount_usd": str(plan["price_usd"]),
+            "amount_uah": str(amount_uah) if amount_uah is not None else "",
+            # Kept so older saved templates using {amount_uah_line} still render.
             "amount_uah_line": amount_uah_line(amount_uah, lang),
         }
         key = f"choose_payment_{lang}"
@@ -2544,6 +2615,8 @@ class BotHandlers:
         values = {
             "plan_name": plan_name(plan, lang),
             "amount_usd": str(amount),
+            "amount_uah": str(amount_uah) if (method_code == "ua_card" and amount_uah is not None) else "",
+            # Kept so older saved templates using these variables still render.
             "amount_uah_line": amount_uah_line(amount_uah, lang) if method_code == "ua_card" else "",
             "payment_amount_lines": payment_amount_lines(amount, amount_uah, method_code, lang),
             "instructions": method_instructions(method, lang),
