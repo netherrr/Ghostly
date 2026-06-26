@@ -2796,6 +2796,10 @@ class BotHandlers:
         elif data == "adm_upload_guide_video":
             await self.db.set_state(tg_id, "admin_upload_guide_video", {})
             await self._send_or_edit(tg_id, state_prompt(lang, "admin_upload_guide_video", {}), cancel_keyboard(lang, "admin_settings"), edit)
+        elif data == "admin_cashout":
+            await self.show_cashout_confirm(tg_id, lang, edit)
+        elif data == "admin_cashout_confirm":
+            await self.perform_cashout(tg_id, lang, edit)
         elif data == "admin_cleanup":
             deleted = await self.db.cleanup_old_messages()
             await self._send_or_edit(tg_id, f"🧹 Cleanup done. Deleted rows: <b>{deleted}</b>", admin_settings_keyboard(lang), edit)
@@ -2864,18 +2868,20 @@ class BotHandlers:
             "",
             "〰️〰️〰️〰️〰️〰️〰️〰️〰️",
             "",
-            "💰 <b>ФІНАНСИ</b> (за валютою оплати):",
+            "💰 <b>БАЛАНС</b> (до виплати, за валютою):",
             f"🇺🇦 Гривня: <b>{fmt_uah(s.get('revenue_uah', 0))} ₴</b> · {e(s.get('payments_uah_count', 0))} оплат",
-            f"⭐ Stars: <b>{fmt_int(s.get('revenue_stars_native', 0))} ⭐</b> · {e(s.get('payments_stars_count', 0))} оплат",
+            f"⭐ Stars (підписки): <b>{fmt_int(s.get('revenue_stars_subs', 0))} ⭐</b> · {e(s.get('payments_stars_subs_count', 0))} оплат",
+            f"💝 Stars (підтримка): <b>{fmt_int(s.get('revenue_stars_support', 0))} ⭐</b> · {e(s.get('payments_stars_support_count', 0))} донатів",
             f"💲 Крипта (USDT/CryptoBot): <b>${fmt_usd(s.get('revenue_crypto_usd', 0))}</b> · {e(s.get('payments_crypto_count', 0))} оплат",
         ]
         if int(s.get("payments_ton_count", 0) or 0) > 0:
             lines.append(f"💎 TON: <b>${fmt_usd(s.get('revenue_ton_usd', 0))}</b> · {e(s.get('payments_ton_count', 0))} оплат")
         lines += [
             "",
-            f"📊 Всього оплат: <b>{e(s.get('payments_paid_count', 0))}</b>",
+            f"📊 Оплат до виплати: <b>{e(s.get('payments_uncashed_count', 0))}</b> (всього за весь час: {e(s.get('payments_paid_count', 0))})",
             f"⏳ Очікують перевірки: <b>{e(s.get('payments_pending', 0))}</b>",
             f"❌ Відхилено: <b>{e(s.get('payments_rejected', 0))}</b>",
+            "💸 Виплата: <code>/cashout</code>",
             "",
             "〰️〰️〰️〰️〰️〰️〰️〰️〰️",
             "",
@@ -2909,6 +2915,79 @@ class BotHandlers:
                 f"🎁 Нараховано днів: <b>{e(ref.get('bonus_days_total', 0))}</b>",
             ]
 
+        stats_kb = inline([
+            [("💸 Виплата (cashout)", "admin_cashout")],
+            [(btn(lang, "back"), "admin")],
+        ])
+        await self._send_or_edit(tg_id, "\n".join(lines), stats_kb, edit)
+
+    def _balance_lines(self, b: dict[str, Any]) -> list[str]:
+        def fmt_uah(v: object) -> str:
+            try:
+                return f"{float(v):,.0f}".replace(",", " ")
+            except Exception:
+                return "0"
+
+        def fmt_int(v: object) -> str:
+            try:
+                return f"{int(round(float(v)))}"
+            except Exception:
+                return "0"
+
+        def fmt_usd(v: object) -> str:
+            try:
+                return f"{float(v):.2f}"
+            except Exception:
+                return "0.00"
+
+        lines = [
+            f"🇺🇦 Гривня: <b>{fmt_uah(b.get('uah', 0))} ₴</b>",
+            f"⭐ Stars (підписки): <b>{fmt_int(b.get('stars_subs', 0))} ⭐</b>",
+            f"💝 Stars (підтримка): <b>{fmt_int(b.get('stars_support', 0))} ⭐</b>",
+            f"💲 Крипта (USDT/CryptoBot): <b>${fmt_usd(b.get('crypto_usd', 0))}</b>",
+        ]
+        if int(b.get("ton_count", 0) or 0) > 0:
+            lines.append(f"💎 TON: <b>${fmt_usd(b.get('ton_usd', 0))}</b>")
+        return lines
+
+    async def show_cashout_confirm(self, tg_id: int, lang: str, edit: tuple[int, int] | None = None) -> None:
+        b = await self.db.current_balance()
+        count = int(b.get("total_count", 0) or 0)
+        if count <= 0:
+            await self._send_or_edit(tg_id, "💸 <b>Виплата</b>\n\nНемає накопичених коштів до виплати.", back_menu(lang, "admin"), edit)
+            return
+        lines = [
+            "💸 <b>Виплата (cashout)</b>",
+            "",
+            "Поточний баланс до виплати:",
+            *self._balance_lines(b),
+            "",
+            f"Оплат у балансі: <b>{count}</b>",
+            "",
+            "⚠️ Підтвердження обнулить баланс у статистиці (позначить ці оплати як виплачені). Історія платежів збережеться.",
+        ]
+        kb = inline([
+            [("✅ Підтвердити виплату", "admin_cashout_confirm")],
+            [(btn(lang, "back"), "admin")],
+        ])
+        await self._send_or_edit(tg_id, "\n".join(lines), kb, edit)
+
+    async def perform_cashout(self, tg_id: int, lang: str, edit: tuple[int, int] | None = None) -> None:
+        result = await self.db.cashout_all(admin_id=tg_id)
+        count = int(result.get("payments_count", 0) or 0)
+        if count <= 0:
+            await self._send_or_edit(tg_id, "💸 Немає коштів до виплати — баланс уже порожній.", back_menu(lang, "admin"), edit)
+            return
+        lines = [
+            "✅ <b>Виплату виконано.</b>",
+            "",
+            "Знято з балансу:",
+            *self._balance_lines(result),
+            "",
+            f"Позначено оплат як виплачені: <b>{count}</b>",
+            "",
+            "Баланс у статистиці обнулено. 💰",
+        ]
         await self._send_or_edit(tg_id, "\n".join(lines), back_menu(lang, "admin"), edit)
 
     async def show_admin_referrals(self, tg_id: int, lang: str, edit: tuple[int, int] | None = None) -> None:
@@ -4599,6 +4678,8 @@ class BotHandlers:
                 chat_id = int(parts[1])
                 await self.db.add_broadcast_chat(chat_id, added_by=admin_id)
                 await self.bot.send_message(admin_id, f"✅ Чат {chat_id} додано до розсилок.")
+            elif cmd == "/cashout":
+                await self.show_cashout_confirm(admin_id, lang)
             elif cmd == "/cleanup":
                 deleted = await self.db.cleanup_old_messages()
                 await self.bot.send_message(admin_id, f"🧹 Cleanup done. Deleted rows: {deleted}")
