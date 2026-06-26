@@ -2832,6 +2832,18 @@ class BotHandlers:
             except Exception:
                 return "0.00"
 
+        def fmt_uah(val: object) -> str:
+            try:
+                return f"{float(val):,.0f}".replace(",", " ")
+            except Exception:
+                return "0"
+
+        def fmt_int(val: object) -> str:
+            try:
+                return f"{int(round(float(val)))}"
+            except Exception:
+                return "0"
+
         lines = [
             f"📊 <b>СТАТИСТИКА VERTUU SPY BOT</b> | {now}",
             "〰️〰️〰️〰️〰️〰️〰️〰️〰️",
@@ -2852,17 +2864,16 @@ class BotHandlers:
             "",
             "〰️〰️〰️〰️〰️〰️〰️〰️〰️",
             "",
-            "💰 <b>ФІНАНСИ:</b>",
-            f"💵 Всього отримано: <b>${fmt_usd(s.get('revenue_total', 0))}</b>",
-            f"📅 Сьогодні: <b>+${fmt_usd(s.get('revenue_today', 0))}</b>",
-            f"📆 За 7 днів: <b>+${fmt_usd(s.get('revenue_7d', 0))}</b>",
-            f"🗓 За 30 днів: <b>+${fmt_usd(s.get('revenue_30d', 0))}</b>",
+            "💰 <b>ФІНАНСИ</b> (за валютою оплати):",
+            f"🇺🇦 Гривня: <b>{fmt_uah(s.get('revenue_uah', 0))} ₴</b> · {e(s.get('payments_uah_count', 0))} оплат",
+            f"⭐ Stars: <b>{fmt_int(s.get('revenue_stars_native', 0))} ⭐</b> · {e(s.get('payments_stars_count', 0))} оплат",
+            f"💲 Крипта (USDT/CryptoBot): <b>${fmt_usd(s.get('revenue_crypto_usd', 0))}</b> · {e(s.get('payments_crypto_count', 0))} оплат",
+        ]
+        if int(s.get("payments_ton_count", 0) or 0) > 0:
+            lines.append(f"💎 TON: <b>${fmt_usd(s.get('revenue_ton_usd', 0))}</b> · {e(s.get('payments_ton_count', 0))} оплат")
+        lines += [
             "",
-            "💳 <b>ПО МЕТОДАХ:</b>",
-            f"💳 Картка: <b>${fmt_usd(s.get('revenue_card', 0))}</b>",
-            f"💎 USDT: <b>${fmt_usd(s.get('revenue_usdt', 0))}</b>",
-            f"🤖 CryptoBot: <b>${fmt_usd(s.get('revenue_crypto', 0))}</b>",
-            f"⭐ Stars: <b>${fmt_usd(s.get('revenue_stars', 0))}</b>",
+            f"📊 Всього оплат: <b>{e(s.get('payments_paid_count', 0))}</b>",
             f"⏳ Очікують перевірки: <b>{e(s.get('payments_pending', 0))}</b>",
             f"❌ Відхилено: <b>{e(s.get('payments_rejected', 0))}</b>",
             "",
@@ -2884,7 +2895,7 @@ class BotHandlers:
         if plans:
             lines += ["", "〰️〰️〰️〰️〰️〰️〰️〰️〰️", "", "📋 <b>ТАРИФИ (продажі):</b>"]
             for p in plans:
-                lines.append(f"💎 {e(p.get('name') or '—')}: <b>{e(p.get('cnt', 0))}</b> шт. · <b>${fmt_usd(p.get('total', 0))}</b>")
+                lines.append(f"💎 {e(p.get('name') or '—')}: <b>{e(p.get('cnt', 0))}</b> шт.")
 
         if ref:
             lines += [
