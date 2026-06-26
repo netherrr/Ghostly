@@ -53,7 +53,7 @@ from keyboards import (
 
 # Bump on every deploy. Shown in /edit and /health so it is obvious at a glance
 # whether the running bot actually has the latest code (i.e. Railway redeployed).
-BUILD = "2026-06-26 · admin-chat-v14"
+BUILD = "2026-06-26 · admin-chat-v15"
 
 
 def e(value: Any) -> str:
@@ -2966,22 +2966,52 @@ class BotHandlers:
         plan = await self.db.get_plan(int(payment["plan_id"])) if payment.get("plan_id") else None
         raw = decode_json(payment.get("raw"), {}) or {}
         proof = raw.get("proof") if isinstance(raw, dict) else None
+        amount_uah = raw.get("amount_uah") if isinstance(raw, dict) else None
+        # Show the UAH amount the user had to pay (only stored for card/UAH).
+        uah_line = f"\n🇺🇦 До сплати: <b>{e(amount_uah)} грн</b>" if amount_uah else ""
         admin_text = (
             f"💳 <b>Manual payment request</b>\n\n"
             f"Payment ID: <code>{payment_id}</code>\n"
             f"User: <code>{user_id}</code> @{e((user or {}).get('username') or '')}\n"
             f"Provider: <b>{e(payment['provider'])}</b>\n"
             f"Plan: <b>{e(plan_name(plan, 'en'))}</b>\n"
-            f"Amount: <b>${e(payment['amount_usd'])}</b>\n"
+            f"Amount: <b>${e(payment['amount_usd'])}</b>"
+            f"{uah_line}\n"
             f"Proof: <b>{e(proof_summary(proof))}</b>"
         )
-        for admin_id in self.admin_notify_targets():
-            try:
-                await self.bot.send_message(admin_id, admin_text, admin_payment_keyboard(payment_id))
+        keyboard = admin_payment_keyboard(payment_id)
+        # If the proof is a captionable media (e.g. a screenshot), send the receipt
+        # and the confirmation text + buttons together as ONE message.
+        proof_file_id = (proof or {}).get("file_id")
+        proof_kind = str((proof or {}).get("kind") or "")
+        combinable = bool(
+            proof_file_id
+            and proof_kind in {"photo", "video", "animation", "document", "audio", "voice"}
+            and len(admin_text) <= 1024
+        )
+
+        async def deliver(admin_id: int) -> None:
+            if combinable:
+                await self.bot.send_cached_media(admin_id, proof_kind, str(proof_file_id), admin_text, keyboard)
+            else:
+                await self.bot.send_message(admin_id, admin_text, keyboard)
                 if proof and proof.get("source_chat_id") and proof.get("source_message_id"):
                     await self.bot.copy_message(admin_id, int(proof["source_chat_id"]), int(proof["source_message_id"]))
+
+        for admin_id in self.admin_notify_targets():
+            try:
+                await deliver(admin_id)
             except Exception as exc:
                 print("Notify admin error", admin_id, repr(exc))
+                # A combined send can fail if Telegram rejects the stored file_id;
+                # fall back to a plain text message + a copy of the proof.
+                if combinable:
+                    try:
+                        await self.bot.send_message(admin_id, admin_text, keyboard)
+                        if proof and proof.get("source_chat_id") and proof.get("source_message_id"):
+                            await self.bot.copy_message(admin_id, int(proof["source_chat_id"]), int(proof["source_message_id"]))
+                    except Exception as exc2:
+                        print("Notify admin fallback error", admin_id, repr(exc2))
 
     async def handle_payment_proof_message(self, tg_id: int, lang: str, msg: dict[str, Any], state_row: dict[str, Any], is_admin: bool) -> None:
         payload = state_row.get("payload") or {}
