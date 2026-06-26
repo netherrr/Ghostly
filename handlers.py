@@ -53,7 +53,7 @@ from keyboards import (
 
 # Bump on every deploy. Shown in /edit and /health so it is obvious at a glance
 # whether the running bot actually has the latest code (i.e. Railway redeployed).
-BUILD = "2026-06-26 · edit-everything-v9"
+BUILD = "2026-06-26 · edit-resolve-v10"
 
 
 def e(value: Any) -> str:
@@ -1502,9 +1502,17 @@ class BotHandlers:
                     await self.handle_broadcast_add_message(tg_id, lang, msg, state)
                     return
             if state_name == "admin_edit_message" and is_admin:
-                # Important: allow replacement text to start with /edit too.
-                await self.handle_admin_edit_content(tg_id, lang, msg, state)
-                return
+                # A fresh "/edit" reply to another bot message starts a NEW edit
+                # of THAT message instead of being swallowed as replacement
+                # content for the previous one. (Plain replacement text may still
+                # accidentally start with /edit — that is handled in
+                # handle_admin_edit_content via strip_accidental_edit_prefix.)
+                if msg.get("reply_to_message") and re.match(r"^/edit(?:@\w+)?(?:\s|$)", text):
+                    await self.db.clear_state(tg_id)
+                    # fall through to the /edit command dispatch below
+                else:
+                    await self.handle_admin_edit_content(tg_id, lang, msg, state)
+                    return
             if not text.startswith("/"):
                 if text:
                     await self.handle_state_input(tg_id, lang, text, state, is_admin)
@@ -2428,6 +2436,11 @@ class BotHandlers:
                 await self.bot.edit_message_text(chat_id, message_id, text, keyboard, entities=entities)
                 if track_key:
                     await self.db.record_sent_template(chat_id, message_id, track_key)
+                else:
+                    # This message was edited into a different screen with no
+                    # template identity — drop any stale mapping so reply -> /edit
+                    # does not resolve the previous screen's template.
+                    await self.db.clear_sent_template(chat_id, message_id)
                 return
             except Exception:
                 pass
@@ -2671,6 +2684,7 @@ class BotHandlers:
         lang: str,
         values: dict[str, Any] | None = None,
         keyboard: dict[str, Any] | None = None,
+        edit: tuple[int, int] | None = None,
     ) -> dict[str, Any] | None:
         """Send a one-off bot message that the admin can edit forever via /edit.
 
@@ -2679,7 +2693,7 @@ class BotHandlers:
         optional media) is used if present, otherwise the built-in i18n text.
         Dynamic data is passed as ``values`` and substituted into {placeholders},
         so it stays live. The sent message is recorded so reply -> /edit resolves
-        exactly this message.
+        exactly this message. ``edit`` replaces an existing message in place.
         """
         values = values or {}
         tkey = f"msg_{key}_{lang}"
@@ -2691,13 +2705,25 @@ class BotHandlers:
                 )
                 media = tpl.get("media")
                 if media:
+                    if edit:
+                        try:
+                            await self.bot.delete_message(edit[0], edit[1])
+                        except Exception:
+                            pass
                     await self.send_template_content(tg_id, rendered, ents, media, keyboard, track_key=tkey)
                     return None
-                result = await self.bot.send_message(tg_id, rendered, keyboard, entities=ents)
-            else:
-                # Default i18n text uses HTML, so escape the live values for it.
-                text = tr(lang, key, **{k: e(v) for k, v in values.items()})
-                result = await self.bot.send_message(tg_id, text, keyboard)
+                await self._send_or_edit(tg_id, rendered, keyboard, edit, entities=ents, track_key=tkey)
+                return None
+            # Default i18n text uses HTML, so escape the live values for it.
+            text = tr(lang, key, **{k: e(v) for k, v in values.items()})
+            if edit:
+                try:
+                    await self.bot.edit_message_text(edit[0], edit[1], text, keyboard)
+                    await self.db.record_sent_template(edit[0], edit[1], tkey)
+                    return None
+                except Exception:
+                    pass
+            result = await self.bot.send_message(tg_id, text, keyboard)
             await self.track_sent(result, tg_id, tkey)
             return result
         except Exception as exc:
@@ -2758,8 +2784,12 @@ class BotHandlers:
                 external_id = str(invoice.get("invoice_id"))
                 url = invoice.get("bot_invoice_url") or invoice.get("mini_app_invoice_url") or invoice.get("web_app_invoice_url") or invoice.get("pay_url")
                 payment = await self.db.create_payment(tg_id, plan_id, "cryptobot", amount, external_id=external_id, invoice_url=url, raw=invoice)
-                text = tr(lang, "payment_crypto_created", amount=e(amount), url=e(url or ""))
-                await self._send_or_edit(tg_id, text, crypto_payment_keyboard(lang, int(payment["id"]), url or "https://t.me/CryptoBot"), edit)
+                await self.editable_send(
+                    tg_id, "payment_crypto_created", lang,
+                    {"amount": amount, "url": url or ""},
+                    crypto_payment_keyboard(lang, int(payment["id"]), url or "https://t.me/CryptoBot"),
+                    edit=edit,
+                )
             except Exception as exc:
                 print("Crypto payment error:", repr(exc))
                 await self.editable_send(tg_id, "payment_error", lang, keyboard=back_menu(lang))

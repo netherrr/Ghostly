@@ -2475,6 +2475,24 @@ Important: check the network before sending. If USDT is sent through the wrong n
             print("get_sent_template_key failed:", repr(exc))
             return None
 
+    async def clear_sent_template(self, chat_id: int, message_id: int) -> None:
+        """Forget a (chat_id, message_id) -> template_key mapping.
+
+        Used when a bot message is edited in place into a different screen, so a
+        later reply -> /edit no longer resolves the stale template.
+        """
+        if not message_id:
+            return
+        try:
+            async with self._pool().acquire() as con:
+                await con.execute(
+                    "DELETE FROM sent_template_messages WHERE chat_id=$1 AND message_id=$2",
+                    int(chat_id),
+                    int(message_id),
+                )
+        except Exception as exc:
+            print("clear_sent_template failed:", repr(exc))
+
     async def set_state(self, user_id: int, state: str, payload: dict[str, Any] | None = None) -> None:
         async with self._pool().acquire() as con:
             await con.execute(
