@@ -393,28 +393,49 @@ TEMPLATE_ALIASES = {
 
 DYNAMIC_TEMPLATE_SPECS = {
     "status": {
-        # Every emoji/label lives in the template (so each can be edited, incl.
-        # Premium emoji). Only data is injected ({sub_until}, counts). The *_flag
-        # variables just pick which state line is shown — they print nothing.
-        "vars": [
-            "sub_until", "sub_active_flag", "sub_free_flag",
-            "biz_on_flag", "biz_off_flag", "saved_count", "deleted_count",
-            "hint_ok_flag", "hint_connect_flag",
-        ],
+        # Everything visible is editable text/emoji; only the {placeholders}
+        # below are filled by the bot with live data.
+        "vars": ["plan_name", "business_status", "saved_count", "deleted_count", "status_hint"],
+        "labels": {
+            "uk": {
+                "plan_name": "статус підписки (активна до дати / відкритий доступ)",
+                "business_status": "стан підключення (підключено / не підключено)",
+                "saved_count": "скільки нових повідомлень збережено",
+                "deleted_count": "скільки видалених знайдено",
+                "status_hint": "підказка під статусом",
+            },
+            "ru": {
+                "plan_name": "статус подписки (активна до даты / открытый доступ)",
+                "business_status": "состояние подключения (подключено / не подключено)",
+                "saved_count": "сколько новых сообщений сохранено",
+                "deleted_count": "сколько удалённых найдено",
+                "status_hint": "подсказка под статусом",
+            },
+            "en": {
+                "plan_name": "subscription status (active until date / open access)",
+                "business_status": "connection state (connected / not connected)",
+                "saved_count": "how many new messages saved",
+                "deleted_count": "how many deleted found",
+                "status_hint": "hint shown under the status",
+            },
+        },
         "default": {
-            "uk": "🛡 Статус захисту\n\n💎 Доступ: активна до {sub_until}{sub_active_flag}\n💎 Доступ: відкритий доступ{sub_free_flag}\n🔌 Автоматизація чатів: ✅ підключено{biz_on_flag}\n🔌 Автоматизація чатів: ❌ не підключено{biz_off_flag}\n💬 Збережено нових повідомлень: {saved_count}\n👻 Видалених знайдено: {deleted_count}\n\n✅ Захист увімкнений. Для тесту попроси когось написати повідомлення й видалити його — я покажу копію тут.{hint_ok_flag}\nЩоб я почав працювати, додай мене в Telegram → профіль → Змінити → Автоматизація чатів. Після цього я бачитиму тільки нові повідомлення в дозволених чатах.{hint_connect_flag}",
-            "ru": "🛡 Статус защиты\n\n💎 Доступ: активна до {sub_until}{sub_active_flag}\n💎 Доступ: открытый доступ{sub_free_flag}\n🔌 Автоматизация чатов: ✅ подключено{biz_on_flag}\n🔌 Автоматизация чатов: ❌ не подключено{biz_off_flag}\n💬 Сохранено новых сообщений: {saved_count}\n👻 Удалённых найдено: {deleted_count}\n\n✅ Защита включена. Для теста попроси кого-то написать сообщение и удалить его — я покажу копию здесь.{hint_ok_flag}\nЧтобы я начал работать, добавь меня в Telegram → профиль → Изм. → Автоматизация чатов. После этого я буду видеть только новые сообщения в разрешённых чатах.{hint_connect_flag}",
-            "en": "🛡 Protection status\n\n💎 Access: active until {sub_until}{sub_active_flag}\n💎 Access: open access{sub_free_flag}\n🔌 Chat Automation: ✅ connected{biz_on_flag}\n🔌 Chat Automation: ❌ not connected{biz_off_flag}\n💬 New messages saved: {saved_count}\n👻 Deleted found: {deleted_count}\n\n✅ Protection is on. Ask someone to send you a message and delete it — I will show a copy here.{hint_ok_flag}\nTo start protection, add me in Telegram → profile → Edit → Chat Automation. After that I only see new messages in allowed chats.{hint_connect_flag}",
+            "uk": "🛡 Статус захисту\n\n💎 Доступ: {plan_name}\n🔌 Автоматизація чатів: {business_status}\n💬 Збережено нових повідомлень: {saved_count}\n👻 Видалених знайдено: {deleted_count}\n\n{status_hint}",
+            "ru": "🛡 Статус защиты\n\n💎 Доступ: {plan_name}\n🔌 Автоматизация чатов: {business_status}\n💬 Сохранено новых сообщений: {saved_count}\n👻 Удалённых найдено: {deleted_count}\n\n{status_hint}",
+            "en": "🛡 Protection status\n\n💎 Access: {plan_name}\n🔌 Chat Automation: {business_status}\n💬 New messages saved: {saved_count}\n👻 Deleted found: {deleted_count}\n\n{status_hint}",
         },
     },
     "plans": {
-        # access_until is the only data; the *_flag variables choose which access
-        # line shows. All emoji/text stay editable in the template.
-        "vars": ["access_until", "access_active_flag", "access_none_flag"],
+        "vars": ["plans_list"],
+        "labels": {
+            "uk": {"plans_list": "твій поточний доступ (дата підписки або «немає підписки»)"},
+            "ru": {"plans_list": "твой текущий доступ (дата подписки или «нет подписки»)"},
+            "en": {"plans_list": "your current access (subscription date or “no subscription”)"},
+        },
         "default": {
-            "uk": "💎 Тарифи VERTUU SPY BOT\n\n✅ Доступ до {access_until}{access_active_flag}\n🔒 Немає активної підписки{access_none_flag}",
-            "ru": "💎 Тарифы VERTUU SPY BOT\n\n✅ Доступ до {access_until}{access_active_flag}\n🔒 Нет активной подписки{access_none_flag}",
-            "en": "💎 VERTUU SPY BOT plans\n\n✅ Access until {access_until}{access_active_flag}\n🔒 No active subscription{access_none_flag}",
+            "uk": "💎 Тарифи VERTUU SPY BOT\n\n{plans_list}",
+            "ru": "💎 Тарифы VERTUU SPY BOT\n\n{plans_list}",
+            "en": "💎 VERTUU SPY BOT plans\n\n{plans_list}",
         },
     },
     "keywords": {
@@ -422,6 +443,11 @@ DYNAMIC_TEMPLATE_SPECS = {
         # inside the {keywords_hint} value; they are inlined here so they can be
         # fully edited. Only pure data stays in variables.
         "vars": ["keywords_count", "keywords_list", "monitored_groups"],
+        "labels": {
+            "uk": {"keywords_count": "скільки слів додано", "keywords_list": "список твоїх ключових слів", "monitored_groups": "групи на моніторингу"},
+            "ru": {"keywords_count": "сколько слов добавлено", "keywords_list": "список твоих ключевых слов", "monitored_groups": "группы на мониторинге"},
+            "en": {"keywords_count": "how many keywords", "keywords_list": "your keywords list", "monitored_groups": "monitored groups"},
+        },
         "default": {
             "uk": "🔎 Сповіщення за ключовими словами\n\nСлів: {keywords_count}\n\n{keywords_list}\n\n📡 Групи на моніторингу:\n{monitored_groups}\n\nℹ️ Додай мене в групу (адміном) і надішли там /watch. Я напишу в особисті, коли зʼявляться твої слова. /unwatch — вимкнути.",
             "ru": "🔎 Оповещения по ключевым словам\n\nСлов: {keywords_count}\n\n{keywords_list}\n\n📡 Группы на мониторинге:\n{monitored_groups}\n\nℹ️ Добавь меня в группу (админом) и отправь там /watch. Я напишу в личку, когда встретятся твои слова. /unwatch — выключить.",
@@ -430,6 +456,11 @@ DYNAMIC_TEMPLATE_SPECS = {
     },
     "deleted": {
         "vars": ["deleted_messages_list", "deleted_count"],
+        "labels": {
+            "uk": {"deleted_count": "скільки видалених знайдено", "deleted_messages_list": "список останніх видалених повідомлень"},
+            "ru": {"deleted_count": "сколько удалённых найдено", "deleted_messages_list": "список последних удалённых сообщений"},
+            "en": {"deleted_count": "how many deleted found", "deleted_messages_list": "list of recent deleted messages"},
+        },
         "default": {
             "uk": "👁 Останні видалені\n\nЗнайдено: {deleted_count}\n\n{deleted_messages_list}",
             "ru": "👁 Последние удалённые\n\nНайдено: {deleted_count}\n\n{deleted_messages_list}",
@@ -438,6 +469,26 @@ DYNAMIC_TEMPLATE_SPECS = {
     },
     "referrals": {
         "vars": ["referral_link", "normal_count", "premium_count", "bonus_days_total", "access_left", "normal_days", "normal_limit", "premium_days"],
+        "labels": {
+            "uk": {
+                "referral_link": "твоє реферальне посилання", "normal_count": "к-сть звичайних рефералів",
+                "premium_count": "к-сть Premium-рефералів", "bonus_days_total": "скільки днів зароблено",
+                "access_left": "до якої дати доступ", "normal_days": "бонус-днів за звичайного реферала",
+                "normal_limit": "ліміт звичайних рефералів", "premium_days": "бонус-днів за Premium-реферала",
+            },
+            "ru": {
+                "referral_link": "твоя реферальная ссылка", "normal_count": "кол-во обычных рефералов",
+                "premium_count": "кол-во Premium-рефералов", "bonus_days_total": "сколько дней заработано",
+                "access_left": "до какой даты доступ", "normal_days": "бонус-дней за обычного реферала",
+                "normal_limit": "лимит обычных рефералов", "premium_days": "бонус-дней за Premium-реферала",
+            },
+            "en": {
+                "referral_link": "your referral link", "normal_count": "number of normal referrals",
+                "premium_count": "number of Premium referrals", "bonus_days_total": "how many days earned",
+                "access_left": "access valid until", "normal_days": "bonus days per normal referral",
+                "normal_limit": "normal referral limit", "premium_days": "bonus days per Premium referral",
+            },
+        },
         "default": {
             "uk": "🤝 Реферальна система\n\nЗапрошуй друзів — отримуй дні Premium.\n• Звичайний реферал: +{normal_days} дн. (до {normal_limit} рефералів)\n• Premium-реферал: +{premium_days} дн.\n\n🔗 Твоє посилання:\n{referral_link}\n\n👥 Звичайних: {normal_count}\n💎 Premium: {premium_count}\n🎁 Зароблено днів: {bonus_days_total}\n⏳ Доступ до: {access_left}",
             "ru": "🤝 Реферальная система\n\nПриглашай друзей — получай дни Premium.\n• Обычный реферал: +{normal_days} дн. (до {normal_limit} рефералов)\n• Premium-реферал: +{premium_days} дн.\n\n🔗 Твоя ссылка:\n{referral_link}\n\n👥 Обычных: {normal_count}\n💎 Premium: {premium_count}\n🎁 Заработано дней: {bonus_days_total}\n⏳ Доступ до: {access_left}",
@@ -449,6 +500,11 @@ DYNAMIC_TEMPLATE_SPECS = {
         # (e.g. swapped for a Premium emoji); only the numbers stay as variables.
         # The UAH line disappears automatically when there is no UAH amount.
         "vars": ["plan_name", "amount_usd", "amount_uah"],
+        "labels": {
+            "uk": {"plan_name": "назва тарифу", "amount_usd": "сума в доларах", "amount_uah": "сума в гривнях"},
+            "ru": {"plan_name": "название тарифа", "amount_usd": "сумма в долларах", "amount_uah": "сумма в гривнах"},
+            "en": {"plan_name": "plan name", "amount_usd": "amount in USD", "amount_uah": "amount in UAH"},
+        },
         "default": {
             "uk": "💳 Оплата тарифу\n\nТариф: {plan_name}\nСума: ${amount_usd}\n🇺🇦 До сплати: {amount_uah} грн\n\nОбери спосіб оплати:",
             "ru": "💳 Оплата тарифа\n\nТариф: {plan_name}\nСумма: ${amount_usd}\n🇺🇦 К оплате: {amount_uah} грн\n\nВыбери способ оплаты:",
@@ -459,6 +515,11 @@ DYNAMIC_TEMPLATE_SPECS = {
         # Same idea: flags/labels live in the editable template, numbers stay in
         # variables. The UAH line is shown only for UAH card payments.
         "vars": ["plan_name", "amount_uah", "amount_usd", "instructions"],
+        "labels": {
+            "uk": {"plan_name": "назва тарифу", "amount_uah": "сума в гривнях", "amount_usd": "сума в доларах", "instructions": "реквізити/інструкція способу оплати"},
+            "ru": {"plan_name": "название тарифа", "amount_uah": "сумма в гривнах", "amount_usd": "сумма в долларах", "instructions": "реквизиты/инструкция способа оплаты"},
+            "en": {"plan_name": "plan name", "amount_uah": "amount in UAH", "amount_usd": "amount in USD", "instructions": "payment method details/instructions"},
+        },
         "default": {
             "uk": "💳 Ручна оплата\n\n💎 Тариф: {plan_name}\n🇺🇦 До сплати: {amount_uah} грн\n💵 До сплати: ${amount_usd}\n\n{instructions}\n\nПісля оплати натисни «Я оплатив» і надішли скрін/квитанцію.",
             "ru": "💳 Ручная оплата\n\n💎 Тариф: {plan_name}\n🇺🇦 К оплате: {amount_uah} грн\n💵 К оплате: ${amount_usd}\n\n{instructions}\n\nПосле оплаты нажми «Я оплатил» и отправь скрин/квитанцию.",
@@ -496,6 +557,24 @@ def dynamic_template_default(base: str, lang: str) -> str:
 def dynamic_required_vars(base: str) -> list[str]:
     spec = DYNAMIC_TEMPLATE_SPECS.get(base) or {}
     return list(spec.get("vars") or [])
+
+
+def dynamic_var_labels(base: str, lang: str) -> dict[str, str]:
+    """Human-readable description for each {placeholder} of a dynamic screen."""
+    spec = DYNAMIC_TEMPLATE_SPECS.get(base) or {}
+    labels = spec.get("labels") or {}
+    return dict(labels.get(lang) or labels.get("uk") or {})
+
+
+def dynamic_legend(base: str, lang: str) -> str:
+    """Build the `{placeholder} — what it means` legend shown during /edit."""
+    labels = dynamic_var_labels(base, lang)
+    lines: list[str] = []
+    for var in dynamic_required_vars(base):
+        token = "{" + var + "}"
+        desc = labels.get(var)
+        lines.append(f"• <code>{e(token)}</code> — {e(desc)}" if desc else f"• <code>{e(token)}</code>")
+    return "\n".join(lines)
 
 
 def missing_dynamic_vars(base: str, text: str) -> list[str]:
@@ -593,26 +672,18 @@ def render_dynamic_template(text: str, entities: list[dict[str, Any]] | None, va
     # inline emoji/label on such a line stays editable yet only shows when there
     # is data to display.
     source, entities = _drop_empty_optional_lines(text or "", entities, values)
-    # Presence flags (name ends with `_flag`) decide which state line survives
-    # above, but must render as nothing — they only switch lines on/off so that
-    # the visible emoji/label can live (and be edited, incl. Premium emoji) in
-    # the template instead of inside an injected value.
-    subst = {
-        k: ("" if k.endswith("_flag") else str(v if v is not None else ""))
-        for k, v in values.items()
-    }
     repls: list[tuple[int, int, int]] = []
     for m in re.finditer(r"\{([a-zA-Z0-9_]+)\}", source):
         name = m.group(1)
         if name not in values:
             continue
         old_token = m.group(0)
-        new_val = subst.get(name, "")
+        new_val = str(values.get(name) or "")
         repls.append((utf16_len(source[:m.start()]), utf16_len(old_token), utf16_len(new_val)))
 
     rendered = source
-    for name in values:
-        rendered = rendered.replace("{" + name + "}", subst.get(name, ""))
+    for name, value in values.items():
+        rendered = rendered.replace("{" + name + "}", str(value or ""))
 
     if not repls:
         return rendered, entities
@@ -1481,24 +1552,14 @@ class BotHandlers:
                 if is_dynamic_template_key(template_key):
                     base = template_base(template_key)
                     editable = str((current_tpl or {}).get("text") or dynamic_template_default(base, lang))
-                    all_vars = dynamic_required_vars(base)
-                    data_vars = [v for v in all_vars if not v.endswith("_flag")]
-                    flag_vars = [v for v in all_vars if v.endswith("_flag")]
+                    legend = dynamic_legend(base, lang)
                     extra += (
-                        "\n\n🎨 <b>Емодзі й текст можна міняти будь-як</b> (зокрема Premium emoji) — просто не чіпай те, що у фігурних дужках."
+                        "\n\n🎨 <b>Редагуй будь-який текст і емодзі</b> (зокрема Premium emoji) — як хочеш."
                     )
-                    if data_vars:
-                        protected = " ".join(["{" + v + "}" for v in data_vars])
+                    if legend:
                         extra += (
-                            "\n\n📊 <b>Дані</b> (підставляються самі, напр. дата/лічильники) — лиши як є:"
-                            f"\n<code>{e(protected)}</code>"
-                        )
-                    if flag_vars:
-                        flags = " ".join(["{" + v + "}" for v in flag_vars])
-                        extra += (
-                            "\n\n🔁 <b>Перемикачі станів</b> (нічого не друкують, але обирають, який рядок показати — напр. «підключено» чи «не підключено»). "
-                            "Залиш їх у тих самих рядках:"
-                            f"\n<code>{e(flags)}</code>"
+                            "\n\n📊 <b>Не чіпай тільки те, що у {дужках} — це бот підставляє сам:</b>\n"
+                            f"{legend}"
                         )
             else:
                 extra = "\n\nℹ️ Це буде разове редагування конкретного повідомлення."
@@ -1518,18 +1579,17 @@ class BotHandlers:
             )
             await self.send_current_text_for_copy(
                 tg_id, editable,
-                title="📋 Шаблон — копіюй і редагуй (змінні в {…} лишай, щоб дані оновлювались):",
+                title="📋 Копіюй, редагуй і надсилай назад. Усе можна міняти, окрім того, що у {дужках}:",
             )
-            # Also show the screen exactly as it looks right now, with every emoji
-            # and live value substituted in. On dynamic screens the template above
-            # hides text inside {variables}; this block lets the admin see and
-            # rewrite ANY visible character. Sending it back makes the screen a
-            # fixed custom text (no auto-updating data).
+            # For reference, also show the screen exactly as it looks right now
+            # with every {placeholder} filled in, so it is clear what the brackets
+            # become. (Editing this version and sending it back would freeze the
+            # data — the template above is the one to edit.)
             onscreen = str(target.get("text") or target.get("caption") or "")
             if onscreen.strip() and onscreen.strip() != (editable or "").strip():
                 await self.send_current_text_for_copy(
                     tg_id, onscreen,
-                    title="🖥 Так екран виглядає зараз (з усіма емодзі та даними). Можеш надіслати свій повний текст — тоді екран стане статичним:",
+                    title="🔎 Для довідки — так екран виглядає зараз, із підставленими даними:",
                 )
             return
 
@@ -2020,19 +2080,10 @@ class BotHandlers:
         tpl = await self.db.get_template(key)
         if tpl:
             values = {
-                # Pure data + presence flags for the new editable template.
-                "sub_until": dt(sub_until) if sub_active else "",
-                "sub_active_flag": "1" if sub_active else "",
-                "sub_free_flag": "" if sub_active else "1",
-                "biz_on_flag": "1" if has_business else "",
-                "biz_off_flag": "" if has_business else "1",
-                "saved_count": str(saved),
-                "deleted_count": str(deleted),
-                "hint_ok_flag": "1" if has_business else "",
-                "hint_connect_flag": "" if has_business else "1",
-                # Kept so older saved status templates still render unchanged.
                 "plan_name": sub_status,
                 "business_status": business_status,
+                "saved_count": str(saved),
+                "deleted_count": str(deleted),
                 "status_hint": hint,
             }
             rendered, ents = render_dynamic_template(str(tpl.get("text") or ""), tpl.get("entities") or [], values)
@@ -2081,21 +2132,12 @@ class BotHandlers:
                 return
             user = await self.db.get_user(tg_id)
             access_line = self.access_status_line(user, lang)
-            sub_until = user.get("subscription_until") if user else None
-            sub_active = bool(sub_until and sub_until > datetime.now(timezone.utc))
             # The full plan list (name, price, Stars) lives on the buttons, so the
             # text stays minimal: a short title and the user's current access.
             key = f"plans_{lang}"
             tpl = await self.db.get_template(key)
             if tpl:
-                values = {
-                    # Pure data + presence flags for the new editable template.
-                    "access_until": dt(sub_until) if sub_active else "",
-                    "access_active_flag": "1" if sub_active else "",
-                    "access_none_flag": "" if sub_active else "1",
-                    # Kept so older saved plans templates still render unchanged.
-                    "plans_list": access_line,
-                }
+                values = {"plans_list": access_line}
                 rendered, ents = render_dynamic_template(str(tpl.get("text") or ""), tpl.get("entities") or [], values)
                 media = tpl.get("media")
                 if media:
