@@ -53,7 +53,7 @@ from keyboards import (
 
 # Bump on every deploy. Shown in /edit and /health so it is obvious at a glance
 # whether the running bot actually has the latest code (i.e. Railway redeployed).
-BUILD = "2026-06-26 · edit-unbake-v11"
+BUILD = "2026-06-26 · edit-alerts-v12"
 
 
 def e(value: Any) -> str:
@@ -547,6 +547,11 @@ MESSAGE_LABELS: dict[str, dict[str, str]] = {
     "bot_username": {"uk": "юзернейм бота", "ru": "юзернейм бота", "en": "bot username"},
     "plan": {"uk": "назва тарифу", "ru": "название тарифа", "en": "plan name"},
     "price": {"uk": "ціна", "ru": "цена", "en": "price"},
+    "chat": {"uk": "назва чату", "ru": "название чата", "en": "chat name"},
+    "author": {"uk": "автор повідомлення", "ru": "автор сообщения", "en": "message author"},
+    "time": {"uk": "час", "ru": "время", "en": "time"},
+    "saved": {"uk": "збережений вміст (текст або інфо про медіа)", "ru": "сохранённое содержимое (текст или инфо о медиа)", "en": "saved content (text or media info)"},
+    "type": {"uk": "тип медіа", "ru": "тип медиа", "en": "media type"},
 }
 
 
@@ -4092,29 +4097,12 @@ class BotHandlers:
             return
 
         explicit = bool(self.raw_update_has_timer_hint(msg))
-        if lang == "ru":
-            title = "🔥 <b>Таймерное медиа сохранено</b>"
-            note = "Я сразу сохранил это медиа, не ожидая удаления или окончания таймера."
-            type_label = "Тип"
-        elif lang == "en":
-            title = "🔥 <b>Timer media saved</b>"
-            note = "I saved this media immediately, without waiting for deletion or timer expiry."
-            type_label = "Type"
-        else:
-            title = "🔥 <b>Таймерове медіа збережено</b>"
-            note = "Я одразу зберіг це медіа, не чекаючи видалення або завершення таймера."
-            type_label = "Тип"
-
-        text = (
-            f"{title}\n\n"
-            f"💬 <b>{tr(lang, 'chat')}:</b> {e(row.get('chat_title') or row.get('chat_id'))}\n"
-            f"👤 <b>{tr(lang, 'from')}:</b> {e(row.get('sender_name') or row.get('sender_id'))}\n"
-            f"📎 <b>{type_label}:</b> {e(media_kind_label(kind, lang))}\n\n"
-            f"{e(note)}"
-        )
-
         try:
-            await self.safe_send(owner_id, text)
+            await self.send_media_alert(
+                owner_id, lang, "alert_timer_saved",
+                row.get("chat_title") or row.get("chat_id"),
+                row.get("sender_name") or row.get("sender_id"), kind,
+            )
             delivered = await self.send_deleted_media_copy(
                 owner_id,
                 lang,
@@ -4174,23 +4162,11 @@ class BotHandlers:
         lang = await self.user_lang(owner_id)
         refreshed = await self.db.find_cached_message(str(cached["business_connection_id"]), int(cached["chat_id"]), int(cached["message_id"]))
         row = refreshed or cached
-        if lang == "en":
-            title = "🔥 <b>Disappearing media saved</b>"
-            note = "This media has a timer/self-destruct hint, so I saved it immediately."
-        elif lang == "ru":
-            title = "🔥 <b>Зникающее медиа сохранено</b>"
-            note = "У этого медиа есть таймер/самоуничтожение, поэтому я сохранил его сразу."
-        else:
-            title = "🔥 <b>Зникаюче медіа збережено</b>"
-            note = "У цього медіа є таймер/самознищення, тому я зберіг його одразу."
-        text = (
-            f"{title}\n\n"
-            f"💬 <b>{tr(lang, 'chat')}:</b> {e(row.get('chat_title') or row.get('chat_id'))}\n"
-            f"👤 <b>{tr(lang, 'from')}:</b> {e(row.get('sender_name') or row.get('sender_id'))}\n"
-            f"📎 <b>Type:</b> {e(media_kind_label(kind, lang))}\n\n"
-            f"{e(note)}"
+        await self.send_media_alert(
+            owner_id, lang, "alert_disappearing_saved",
+            row.get("chat_title") or row.get("chat_id"),
+            row.get("sender_name") or row.get("sender_id"), kind,
         )
-        await self.safe_send(owner_id, text)
         if row.get("file_id") or row.get("file_bytes"):
             delivered = await self.send_deleted_media_copy(owner_id, lang, kind, str(row.get("file_id") or ""), row.get("caption"), row)
             if delivered:
@@ -4248,29 +4224,12 @@ class BotHandlers:
         if not (row.get("file_id") or row.get("file_bytes") is not None):
             return
 
-        if lang == "en":
-            title = "🔥 <b>Media backup saved</b>"
-            note = "I saved this media immediately, so timer/disappearing media will not be lost."
-            type_label = "Type"
-        elif lang == "ru":
-            title = "🔥 <b>Медиа сохранено</b>"
-            note = "Я сохранил это медиа сразу, поэтому таймеровые/исчезающие сообщения не потеряются."
-            type_label = "Тип"
-        else:
-            title = "🔥 <b>Медіа збережено</b>"
-            note = "Я зберіг це медіа одразу, тому таймерові/зникаючі повідомлення не загубляться."
-            type_label = "Тип"
-
-        text = (
-            f"{title}\n\n"
-            f"💬 <b>{tr(lang, 'chat')}:</b> {e(row.get('chat_title') or row.get('chat_id'))}\n"
-            f"👤 <b>{tr(lang, 'from')}:</b> {e(row.get('sender_name') or row.get('sender_id'))}\n"
-            f"📎 <b>{type_label}:</b> {e(media_kind_label(kind, lang))}\n\n"
-            f"{e(note)}"
-        )
-
         try:
-            await self.safe_send(owner_id, text)
+            await self.send_media_alert(
+                owner_id, lang, "alert_media_backup",
+                row.get("chat_title") or row.get("chat_id"),
+                row.get("sender_name") or row.get("sender_id"), kind,
+            )
             delivered = await self.send_deleted_media_copy(
                 owner_id,
                 lang,
@@ -4389,30 +4348,13 @@ class BotHandlers:
         lang = await self.user_lang(owner_id)
         fr = reply_to.get("from") or {}
         sender_name = " ".join(filter(None, [fr.get("first_name"), fr.get("last_name")])) or str(replied_from_id)
-        chat_label = e(chat.get("title") or str(chat_id))
-
-        if lang == "ru":
-            title = "🔥 <b>Таймерное медиа — извлечено через ответ</b>"
-            note = "Вы ответили на это сообщение, поэтому я смог извлечь медиа до открытия."
-        elif lang == "en":
-            title = "🔥 <b>Timer media — extracted via reply</b>"
-            note = "You replied to this message, so I extracted the media before it was opened."
-        else:
-            title = "🔥 <b>Таймерове медіа — витягнуто через відповідь</b>"
-            note = "Ви відповіли на це повідомлення, тому я витягнув медіа до відкриття."
-
-        type_label = "Type" if lang == "en" else "Тип"
-        text = (
-            f"{title}\n\n"
-            f"💬 <b>{tr(lang, 'chat')}:</b> {chat_label}\n"
-            f"👤 <b>{tr(lang, 'from')}:</b> {e(sender_name)}\n"
-            f"📎 <b>{type_label}:</b> {e(media_kind_label(kind, lang))}\n\n"
-            f"{e(note)}"
-        )
 
         delivered = False
         try:
-            await self.safe_send(owner_id, text)
+            await self.send_media_alert(
+                owner_id, lang, "alert_timer_reply",
+                chat.get("title") or str(chat_id), sender_name, kind,
+            )
             # Try sending by file_id first (works for most media including view-once via reply)
             try:
                 await self.bot.send_cached_media(owner_id, kind, file_id)
@@ -4668,10 +4610,6 @@ class BotHandlers:
     async def send_deleted_message(self, owner_id: int, lang: str, cached: dict[str, Any]) -> bool:
         kind = cached.get("content_type") or "unknown"
         body = cached.get("text") or cached.get("caption") or ""
-        label = tr(lang, "text") if cached.get("text") else tr(lang, "caption")
-        when_label = "Time" if lang == "en" else "Время" if lang == "ru" else "Час"
-        chat_label = tr(lang, "chat")
-        from_label = tr(lang, "from")
         saved_label = "Saved copy" if lang == "en" else "Сохранённая копия" if lang == "ru" else "Збережена копія"
         service_note = (
             "This copy was saved before the message was deleted."
@@ -4680,45 +4618,46 @@ class BotHandlers:
             if lang == "ru"
             else "Цю копію було збережено до видалення повідомлення."
         )
-        text = (
-            f"{tr(lang, 'deleted_title')}\n\n"
-            f"💬 <b>{chat_label}:</b> {e(cached.get('chat_title') or cached.get('chat_id'))}\n"
-            f"👤 <b>{from_label}:</b> {e(cached.get('sender_name') or cached.get('sender_id'))}\n"
-            f"🕒 <b>{when_label}:</b> <code>{dt(cached.get('created_at'))}</code>\n"
-        )
+        # The notification structure (title + Chat/From/Time labels) is editable
+        # via /edit on msg_alert_deleted_<lang>; the dynamic data goes in
+        # {placeholders}. {saved} is the (varying) saved content section.
         if body:
-            text += f"\n🧾 <b>{saved_label}:</b>\n{e(body)[:3000]}\n\n<i>{e(service_note)}</i>"
+            saved = f"🧾 {saved_label}:\n{str(body)[:3000]}\n\n{service_note}"
         elif cached.get("file_id") or cached.get("file_bytes") is not None:
             kind_label = media_kind_label(kind, lang)
             if lang == "en":
-                media_text = (
-                    f"🔥 <b>Deleted/disappearing media saved</b>\n"
-                    f"📎 <b>Type:</b> {e(kind_label)}\n"
-                    "I will send the saved file below. If Telegram blocks voice as a voice message, I will send it as MP3 or ZIP."
-                )
+                saved = f"🔥 Deleted/disappearing media saved\n📎 Type: {kind_label}\nI will send the saved file below. If Telegram blocks voice as a voice message, I will send it as MP3 or ZIP."
             elif lang == "ru":
-                media_text = (
-                    f"🔥 <b>Сохранено удалённое/исчезающее медиа</b>\n"
-                    f"📎 <b>Тип:</b> {e(kind_label)}\n"
-                    "Я отправлю сохранённый файл ниже. Если Telegram заблокирует голосовое как voice, отправлю MP3 или ZIP."
-                )
+                saved = f"🔥 Сохранено удалённое/исчезающее медиа\n📎 Тип: {kind_label}\nЯ отправлю сохранённый файл ниже. Если Telegram заблокирует голосовое как voice, отправлю MP3 или ZIP."
             else:
-                media_text = (
-                    f"🔥 <b>Збережено видалене/зникаюче медіа</b>\n"
-                    f"📎 <b>Тип:</b> {e(kind_label)}\n"
-                    "Я надішлю збережений файл нижче. Якщо Telegram заблокує голосове як voice, надішлю MP3 або ZIP."
-                )
-            text += "\n" + media_text
+                saved = f"🔥 Збережено видалене/зникаюче медіа\n📎 Тип: {kind_label}\nЯ надішлю збережений файл нижче. Якщо Telegram заблокує голосове як voice, надішлю MP3 або ZIP."
         else:
-            text += "\n" + tr(lang, "unknown_deleted")
+            saved = strip_visible_html_tags(tr(lang, "unknown_deleted"))
         try:
-            await self.bot.send_message(owner_id, text)
+            await self.editable_send(owner_id, "alert_deleted", lang, {
+                "chat": cached.get("chat_title") or cached.get("chat_id"),
+                "author": cached.get("sender_name") or cached.get("sender_id"),
+                "time": dt(cached.get("created_at")),
+                "saved": saved,
+            })
             if (cached.get("file_id") or cached.get("file_bytes") is not None) and kind in {"photo", "video", "animation", "document", "audio", "voice", "video_note", "sticker"}:
                 await self.send_deleted_media_copy(owner_id, lang, kind, str(cached.get("file_id") or ""), cached.get("caption"), cached)
             return True
         except Exception as exc:
             print("Send deleted message error:", repr(exc))
             return False
+
+    async def send_media_alert(self, owner_id: int, lang: str, key: str, chat: Any, author: Any, kind: str) -> None:
+        """Send an editable media-saved notification (timer/disappearing/backup).
+
+        Structure (title, Chat/From/Type labels, note) is editable via /edit on
+        msg_<key>_<lang>; the chat/author/type are filled into {placeholders}.
+        """
+        await self.editable_send(owner_id, key, lang, {
+            "chat": chat,
+            "author": author,
+            "type": media_kind_label(kind, lang),
+        })
 
     def convert_audio_to_mp3(self, content: bytes, source_suffix: str = ".ogg") -> bytes | None:
         """Convert Telegram voice/audio bytes to MP3 using ffmpeg.
