@@ -17,11 +17,25 @@ def _split_ids(value: str | None) -> list[int]:
     return ids
 
 
+def _single_id(value: str | None) -> int | None:
+    """Parse one chat/user id (groups are negative, e.g. -1001234567890)."""
+    if not value:
+        return None
+    value = value.strip()
+    if not value:
+        return None
+    try:
+        return int(value)
+    except ValueError:
+        return None
+
+
 @dataclass(frozen=True)
 class Settings:
     bot_token: str
     database_url: str
     admin_ids: list[int]
+    admin_chat_id: int | None
     webhook_base_url: str | None
     webhook_secret: str
     port: int
@@ -60,6 +74,7 @@ def load_settings() -> Settings:
         bot_token=token,
         database_url=database_url,
         admin_ids=_split_ids(os.getenv("ADMIN_IDS")),
+        admin_chat_id=_single_id(os.getenv("ADMIN_CHAT_ID")),
         webhook_base_url=os.getenv("WEBHOOK_BASE_URL", "").strip() or None,
         webhook_secret=webhook_secret,
         port=int(os.getenv("PORT", "8080")),
