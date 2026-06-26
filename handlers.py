@@ -51,6 +51,11 @@ from keyboards import (
 )
 
 
+# Bump on every deploy. Shown in /edit and /health so it is obvious at a glance
+# whether the running bot actually has the latest code (i.e. Railway redeployed).
+BUILD = "2026-06-26 · edit-legend-v6"
+
+
 def e(value: Any) -> str:
     return html.escape(str(value)) if value is not None else ""
 
@@ -1571,7 +1576,7 @@ class BotHandlers:
             # the admin always sees ALL of it, even for very long screens.
             await self.bot.send_message(
                 tg_id,
-                "✏️ <b>Режим редагування увімкнено.</b>\n\n"
+                f"✏️ <b>Режим редагування увімкнено.</b> <code>build: {e(BUILD)}</code>\n\n"
                 "Тепер надішли <b>новий контент</b> одним повідомленням — без /edit на початку.\n"
                 "Це може бути текст або фото/відео/GIF/файл з підписом. Premium emoji, жирний/курсивний текст, посилання і перенос рядків збережуться."
                 f"{extra}\n\n"
