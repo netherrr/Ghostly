@@ -55,6 +55,46 @@ def e(value: Any) -> str:
     return html.escape(str(value)) if value is not None else ""
 
 
+def split_escaped_for_pre(text: str, budget: int = 3500) -> list[str]:
+    """Split raw text so each chunk, once HTML-escaped and wrapped in <pre>,
+    stays safely under Telegram's 4096-character per-message limit.
+
+    Long screens (start, connect, privacy …) easily exceed that limit. Embedding
+    the whole current text in a single message made the send fail outright, so
+    the admin saw only part of the editable text — or nothing. We split on line
+    boundaries when possible and hard-split only individual lines that are
+    themselves too long, measuring the *escaped* length so multi-character
+    escapes (``&lt;``, ``&amp;`` …) never push a chunk over the limit.
+    """
+    if not text:
+        return []
+    chunks: list[str] = []
+    current = ""
+    for line in text.split("\n"):
+        candidate = line if not current else f"{current}\n{line}"
+        if len(html.escape(candidate)) <= budget:
+            current = candidate
+            continue
+        if current:
+            chunks.append(current)
+            current = ""
+        if len(html.escape(line)) <= budget:
+            current = line
+            continue
+        # A single line longer than the budget: split it character by character.
+        piece = ""
+        for ch in line:
+            if piece and len(html.escape(piece + ch)) > budget:
+                chunks.append(piece)
+                piece = ch
+            else:
+                piece += ch
+        current = piece
+    if current:
+        chunks.append(current)
+    return chunks
+
+
 APP_TIMEZONE_NAME = os.getenv("APP_TIMEZONE", "Europe/Kyiv").strip() or "Europe/Kyiv"
 try:
     APP_TIMEZONE = ZoneInfo(APP_TIMEZONE_NAME)
@@ -666,6 +706,10 @@ def detect_template_from_target(target: dict[str, Any] | None, lang: str) -> str
         return f"keywords_{lang}"
     if any(cb == "support_custom" or cb.startswith("support_amount:") for cb in callbacks):
         return f"support_{lang}"
+    # The last-deleted screen carries these unique buttons, so it stays editable
+    # even when its text is fully replaced with custom Premium-emoji content.
+    if any(cb in {"toggle_own", "disappearing_guide"} for cb in callbacks):
+        return f"deleted_{lang}"
 
     # Static/specific screens first. Privacy and connection instructions can
     # contain words like "Business-підключення", so they must not be mistaken
@@ -1336,6 +1380,7 @@ class BotHandlers:
 
         if not new_text.strip():
             await self.db.set_state(tg_id, "admin_edit_message", payload)
+            editable = ""
             if template_key:
                 extra = f"\n\n🧩 <b>Я визначив цей екран як шаблон:</b> <code>{e(template_key)}</code>. Новий контент збережу назавжди."
                 current_tpl = await self.db.get_template(template_key)
@@ -1353,10 +1398,14 @@ class BotHandlers:
                         "\nМожеш залишити їх — тоді дані будуть оновлюватись. Можеш прибрати — тоді екран стане статичним."
                         f"\n<code>{e(protected)}</code>"
                     )
-                if editable:
-                    extra += "\n\n📋 <b>Поточний текст для копіювання:</b>" f"\n<pre>{e(editable)}</pre>"
             else:
                 extra = "\n\nℹ️ Це буде разове редагування конкретного повідомлення."
+                # Show the current text too, so a one-off message is just as easy
+                # to tweak to perfection as a saved template.
+                editable = str(target.get("text") or target.get("caption") or "")
+            # The prompt itself is always short, so it never hits the message
+            # limit. The current text is sent separately (and chunked) below so
+            # the admin always sees ALL of it, even for very long screens.
             await self.bot.send_message(
                 tg_id,
                 "✏️ <b>Режим редагування увімкнено.</b>\n\n"
@@ -1365,9 +1414,33 @@ class BotHandlers:
                 f"{extra}\n\n"
                 "Скасувати: /start",
             )
+            await self.send_current_text_for_copy(tg_id, editable)
             return
 
         await self.perform_admin_edit(tg_id, lang, payload, new_text, entities)
+
+    async def send_current_text_for_copy(self, tg_id: int, editable: str) -> None:
+        """Send the FULL current text as copyable <pre> blocks.
+
+        Long screens exceed Telegram's per-message limit, so the text is split
+        into as many chunks as needed. This guarantees the admin always sees the
+        whole editable text — not a cut-off preview — and can copy it to tweak.
+        """
+        editable = editable or ""
+        if not editable.strip():
+            return
+        chunks = split_escaped_for_pre(editable)
+        total = len(chunks)
+        for idx, chunk in enumerate(chunks, 1):
+            header = (
+                f"📋 <b>Поточний текст ({idx}/{total}) — копіюй і редагуй:</b>\n"
+                if total > 1
+                else "📋 <b>Поточний текст — копіюй і редагуй:</b>\n"
+            )
+            try:
+                await self.bot.send_message(tg_id, f"{header}<pre>{e(chunk)}</pre>")
+            except Exception as exc:
+                print("send_current_text_for_copy chunk failed:", repr(exc), flush=True)
 
     async def handle_admin_edit_content(self, tg_id: int, lang: str, msg: dict[str, Any], state_row: dict[str, Any]) -> None:
         payload = state_row.get("payload") or {}
