@@ -240,6 +240,17 @@ class Database:
         -- only reports edits/deletions from other people.
         ALTER TABLE users ADD COLUMN IF NOT EXISTS track_own_messages BOOLEAN NOT NULL DEFAULT TRUE;
 
+        -- Cashout: a paid payment with cashed_out_at set is considered already
+        -- withdrawn, so it no longer counts toward the current balance in stats.
+        ALTER TABLE payments ADD COLUMN IF NOT EXISTS cashed_out_at TIMESTAMPTZ;
+        CREATE TABLE IF NOT EXISTS cashouts (
+            id BIGSERIAL PRIMARY KEY,
+            admin_id BIGINT,
+            payments_count INT NOT NULL DEFAULT 0,
+            summary JSONB NOT NULL DEFAULT '{}'::jsonb,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+
         -- Each row is one referral accrual. referred_id is unique (when not null)
         -- so a single Telegram account can be credited at most once. Manual admin
         -- adjustments use kind='manual' with referred_id NULL.
@@ -2244,17 +2255,22 @@ Important: check the network before sending. If USDT is sent through the wrong n
                   (SELECT COALESCE(SUM(amount_usd),0) FROM payments WHERE status='paid' AND provider='telegram_stars') AS revenue_stars,
                   (SELECT COALESCE(SUM(amount_usd),0) FROM payments WHERE status='paid' AND provider IN ('usdt_trc20','usdt_bep20')) AS revenue_usdt,
                   -- Per-currency revenue, counted in the currency actually paid.
+                  -- cashed_out_at IS NULL => this is the current, not-yet-withdrawn balance.
                   (SELECT COALESCE(SUM(COALESCE(NULLIF(raw->>'amount_uah','')::numeric, amount_usd * $1)),0)
-                     FROM payments WHERE status='paid' AND provider='ua_card') AS revenue_uah,
-                  (SELECT COUNT(*) FROM payments WHERE status='paid' AND provider='ua_card') AS payments_uah_count,
+                     FROM payments WHERE status='paid' AND cashed_out_at IS NULL AND provider='ua_card') AS revenue_uah,
+                  (SELECT COUNT(*) FROM payments WHERE status='paid' AND cashed_out_at IS NULL AND provider='ua_card') AS payments_uah_count,
                   (SELECT COALESCE(SUM(NULLIF(raw->>'stars','')::numeric),0)
-                     FROM payments WHERE status='paid' AND currency='XTR') AS revenue_stars_native,
-                  (SELECT COUNT(*) FROM payments WHERE status='paid' AND currency='XTR') AS payments_stars_count,
+                     FROM payments WHERE status='paid' AND cashed_out_at IS NULL AND provider='telegram_stars') AS revenue_stars_subs,
+                  (SELECT COUNT(*) FROM payments WHERE status='paid' AND cashed_out_at IS NULL AND provider='telegram_stars') AS payments_stars_subs_count,
+                  (SELECT COALESCE(SUM(NULLIF(raw->>'stars','')::numeric),0)
+                     FROM payments WHERE status='paid' AND cashed_out_at IS NULL AND provider='stars_support') AS revenue_stars_support,
+                  (SELECT COUNT(*) FROM payments WHERE status='paid' AND cashed_out_at IS NULL AND provider='stars_support') AS payments_stars_support_count,
                   (SELECT COALESCE(SUM(amount_usd),0)
-                     FROM payments WHERE status='paid' AND provider IN ('cryptobot','usdt_trc20','usdt_bep20','binance_id')) AS revenue_crypto_usd,
-                  (SELECT COUNT(*) FROM payments WHERE status='paid' AND provider IN ('cryptobot','usdt_trc20','usdt_bep20','binance_id')) AS payments_crypto_count,
-                  (SELECT COALESCE(SUM(amount_usd),0) FROM payments WHERE status='paid' AND provider='ton') AS revenue_ton_usd,
-                  (SELECT COUNT(*) FROM payments WHERE status='paid' AND provider='ton') AS payments_ton_count,
+                     FROM payments WHERE status='paid' AND cashed_out_at IS NULL AND provider IN ('cryptobot','usdt_trc20','usdt_bep20','binance_id')) AS revenue_crypto_usd,
+                  (SELECT COUNT(*) FROM payments WHERE status='paid' AND cashed_out_at IS NULL AND provider IN ('cryptobot','usdt_trc20','usdt_bep20','binance_id')) AS payments_crypto_count,
+                  (SELECT COALESCE(SUM(amount_usd),0) FROM payments WHERE status='paid' AND cashed_out_at IS NULL AND provider='ton') AS revenue_ton_usd,
+                  (SELECT COUNT(*) FROM payments WHERE status='paid' AND cashed_out_at IS NULL AND provider='ton') AS payments_ton_count,
+                  (SELECT COUNT(*) FROM payments WHERE status='paid' AND cashed_out_at IS NULL) AS payments_uncashed_count,
                   (SELECT COUNT(*) FROM payments WHERE status='paid') AS payments_paid_count,
                   (SELECT COUNT(*) FROM payments WHERE status IN ('pending','waiting_admin') AND provider <> 'cryptobot') AS payments_pending,
                   (SELECT COUNT(*) FROM payments WHERE status='rejected') AS payments_rejected,
@@ -2293,6 +2309,66 @@ Important: check the network before sending. If USDT is sent through the wrong n
             )
             base["referrals"] = dict(ref_row)
             return base
+
+    async def current_balance(self) -> dict[str, Any]:
+        """Per-currency totals of paid, not-yet-cashed-out payments."""
+        try:
+            uah_rate = Decimal(str(await self.get_setting("uah_rate", 44) or 44))
+        except Exception:
+            uah_rate = Decimal("44")
+        async with self._pool().acquire() as con:
+            row = await con.fetchrow(
+                """
+                SELECT
+                  COALESCE(SUM(CASE WHEN provider='ua_card'
+                      THEN COALESCE(NULLIF(raw->>'amount_uah','')::numeric, amount_usd * $1) END),0) AS uah,
+                  COUNT(*) FILTER (WHERE provider='ua_card') AS uah_count,
+                  COALESCE(SUM(CASE WHEN provider='telegram_stars' THEN NULLIF(raw->>'stars','')::numeric END),0) AS stars_subs,
+                  COUNT(*) FILTER (WHERE provider='telegram_stars') AS stars_subs_count,
+                  COALESCE(SUM(CASE WHEN provider='stars_support' THEN NULLIF(raw->>'stars','')::numeric END),0) AS stars_support,
+                  COUNT(*) FILTER (WHERE provider='stars_support') AS stars_support_count,
+                  COALESCE(SUM(CASE WHEN provider IN ('cryptobot','usdt_trc20','usdt_bep20','binance_id') THEN amount_usd END),0) AS crypto_usd,
+                  COUNT(*) FILTER (WHERE provider IN ('cryptobot','usdt_trc20','usdt_bep20','binance_id')) AS crypto_count,
+                  COALESCE(SUM(CASE WHEN provider='ton' THEN amount_usd END),0) AS ton_usd,
+                  COUNT(*) FILTER (WHERE provider='ton') AS ton_count,
+                  COUNT(*) AS total_count
+                FROM payments
+                WHERE status='paid' AND cashed_out_at IS NULL
+                """,
+                uah_rate,
+            )
+            return dict(row)
+
+    async def cashout_all(self, admin_id: int | None = None) -> dict[str, Any]:
+        """Mark every paid, not-yet-cashed-out payment as withdrawn.
+
+        Returns the per-currency summary that was withdrawn and logs a cashout
+        row. Payment history is preserved; only the current balance is reset.
+        """
+        balance = await self.current_balance()
+        summary = {
+            "uah": str(balance.get("uah") or 0),
+            "stars_subs": str(balance.get("stars_subs") or 0),
+            "stars_support": str(balance.get("stars_support") or 0),
+            "crypto_usd": str(balance.get("crypto_usd") or 0),
+            "ton_usd": str(balance.get("ton_usd") or 0),
+        }
+        async with self._pool().acquire() as con:
+            async with con.transaction():
+                count = int(await con.fetchval(
+                    "WITH upd AS ("
+                    "  UPDATE payments SET cashed_out_at=NOW()"
+                    "  WHERE status='paid' AND cashed_out_at IS NULL RETURNING 1"
+                    ") SELECT COUNT(*) FROM upd"
+                ) or 0)
+                await con.execute(
+                    "INSERT INTO cashouts(admin_id, payments_count, summary) VALUES($1, $2, $3::jsonb)",
+                    int(admin_id) if admin_id else None,
+                    count,
+                    json.dumps(summary),
+                )
+        balance["payments_count"] = count
+        return balance
 
     async def set_setting(self, key: str, value: Any) -> None:
         async with self._pool().acquire() as con:
