@@ -53,7 +53,7 @@ from keyboards import (
 
 # Bump on every deploy. Shown in /edit and /health so it is obvious at a glance
 # whether the running bot actually has the latest code (i.e. Railway redeployed).
-BUILD = "2026-06-26 · edit-migrate-v7"
+BUILD = "2026-06-26 · edit-unified-v8"
 
 
 def e(value: Any) -> str:
@@ -526,9 +526,9 @@ DYNAMIC_TEMPLATE_SPECS = {
             "en": {"plan_name": "plan name", "amount_uah": "amount in UAH", "amount_usd": "amount in USD", "instructions": "payment method details/instructions"},
         },
         "default": {
-            "uk": "💳 Ручна оплата\n\n💎 Тариф: {plan_name}\n🇺🇦 До сплати: {amount_uah} грн\n💵 До сплати: ${amount_usd}\n\n{instructions}\n\nПісля оплати натисни «Я оплатив» і надішли скрін/квитанцію.",
-            "ru": "💳 Ручная оплата\n\n💎 Тариф: {plan_name}\n🇺🇦 К оплате: {amount_uah} грн\n💵 К оплате: ${amount_usd}\n\n{instructions}\n\nПосле оплаты нажми «Я оплатил» и отправь скрин/квитанцию.",
-            "en": "💳 Manual payment\n\n💎 Plan: {plan_name}\n🇺🇦 To pay: {amount_uah} UAH\n💵 To pay: ${amount_usd}\n\n{instructions}\n\nAfter payment, press “I paid” and send a receipt/screenshot.",
+            "uk": "💳 Ручна оплата\n\n💎 Тариф: {plan_name}\n💰 Сума: ${amount_usd}\n🇺🇦 До сплати: {amount_uah} грн\n\n{instructions}\n\nПісля оплати: натисни «Я оплатив» і надішли скрін/квитанцію/файл/відео. Адмін перевірить оплату й активує доступ.",
+            "ru": "💳 Ручная оплата\n\n💎 Тариф: {plan_name}\n💰 Сумма: ${amount_usd}\n🇺🇦 К оплате: {amount_uah} грн\n\n{instructions}\n\nПосле оплаты: нажми «Я оплатил» и отправь скрин/квитанцию/файл/видео. Админ проверит оплату и активирует доступ.",
+            "en": "💳 Manual payment\n\n💎 Plan: {plan_name}\n💰 Amount: ${amount_usd}\n🇺🇦 To pay: {amount_uah} UAH\n\n{instructions}\n\nAfter payment: press “I paid” and send a screenshot/receipt/file/video. Admin will verify and activate access.",
         },
     },
 }
@@ -1615,14 +1615,14 @@ class BotHandlers:
                     # Show old saved templates in the modern decomposed form so the
                     # emoji/labels that used to be locked in a value become editable.
                     editable = migrate_dynamic_text(base, raw, lang)
-                    present = present_dynamic_vars(base, editable)
-                    legend = dynamic_legend(base, lang, only=present)
+                    legend = dynamic_legend(base, lang)
                     extra += (
                         "\n\n🎨 <b>Редагуй будь-який текст і емодзі</b> (зокрема Premium emoji) — як хочеш."
                     )
                     if legend:
                         extra += (
-                            "\n\n📊 <b>Не чіпай тільки те, що у {дужках} — це бот підставляє сам:</b>\n"
+                            "\n\n📊 <b>Змінні в {дужках} — бот підставляє сам.</b> Не чіпай ті, що вже є; "
+                            "а будь-яку з цих можеш вставити туди, де хочеш авто-дані (напр. дату, суму, лічильник):\n"
                             f"{legend}"
                         )
             else:
@@ -2140,32 +2140,16 @@ class BotHandlers:
         business_status = tr(lang, "business_on") if has_business else tr(lang, "business_off")
         hint = tr(lang, "status_hint_ok") if has_business else tr(lang, "status_hint_connect")
 
-        key = f"status_{lang}"
-        tpl = await self.db.get_template(key)
-        if tpl:
-            values = {
-                "plan_name": sub_status,
-                "business_status": business_status,
-                "saved_count": str(saved),
-                "deleted_count": str(deleted),
-                "status_hint": hint,
-            }
-            rendered, ents = render_dynamic_template(str(tpl.get("text") or ""), tpl.get("entities") or [], values)
-            media = tpl.get("media")
-            if media:
-                if edit:
-                    chat_id, message_id = edit
-                    try:
-                        await self.bot.delete_message(chat_id, message_id)
-                    except Exception:
-                        pass
-                await self.send_template_content(tg_id, rendered, ents, media, back_menu(lang), track_key=key)
-            else:
-                await self._send_or_edit(tg_id, rendered, back_menu(lang), edit, entities=ents, track_key=key)
-            return
-
-        text = tr(lang, "status", sub_status=e(sub_status), business_status=e(business_status), saved=saved, deleted=deleted, hint=e(hint))
-        await self._send_or_edit(tg_id, text, back_menu(lang), edit, track_key=key)
+        values = {
+            "plan_name": sub_status,
+            "business_status": business_status,
+            "saved_count": str(saved),
+            "deleted_count": str(deleted),
+            "status_hint": hint,
+        }
+        await self.render_dynamic_screen(
+            tg_id, "status", lang, values, back_menu(lang), edit, key=f"status_{lang}",
+        )
 
     def access_status_line(self, user: dict[str, Any] | None, lang: str) -> str:
         sub_until = user.get("subscription_until") if user else None
@@ -2198,25 +2182,10 @@ class BotHandlers:
             access_line = self.access_status_line(user, lang)
             # The full plan list (name, price, Stars) lives on the buttons, so the
             # text stays minimal: a short title and the user's current access.
-            key = f"plans_{lang}"
-            tpl = await self.db.get_template(key)
-            if tpl:
-                values = {"plans_list": access_line}
-                rendered, ents = render_dynamic_template(str(tpl.get("text") or ""), tpl.get("entities") or [], values)
-                media = tpl.get("media")
-                if media:
-                    if edit:
-                        chat_id, message_id = edit
-                        try:
-                            await self.bot.delete_message(chat_id, message_id)
-                        except Exception:
-                            pass
-                    await self.send_template_content(tg_id, rendered, ents, media, plans_keyboard(lang, plans), track_key=key)
-                else:
-                    await self._send_or_edit(tg_id, rendered, plans_keyboard(lang, plans), edit, entities=ents, track_key=key)
-                return
-            text = f"{tr(lang, 'plans_title', app=e(self.settings.app_name), bot_username=e(self.bot_username()))}\n\n{access_line}"
-            await self._send_or_edit(tg_id, text, plans_keyboard(lang, plans), edit, track_key=f"plans_{lang}")
+            values = {"plans_list": access_line}
+            await self.render_dynamic_screen(
+                tg_id, "plans", lang, values, plans_keyboard(lang, plans), edit, key=f"plans_{lang}",
+            )
         except Exception as exc:
             print("show_plans error:", repr(exc), flush=True)
             await self.safe_send(tg_id, "❌ Не вдалося завантажити тарифи. Спробуй /plans ще раз або напиши підтримці.")
@@ -2249,31 +2218,16 @@ class BotHandlers:
         )
         hint = f"{groups_title}\n{groups_body}\n\n{how_to}"
 
-        key = f"keywords_{lang}"
-        tpl = await self.db.get_template(key)
-        if tpl:
-            values = {
-                "keywords_list": body,
-                "keywords_count": str(len(words)),
-                "monitored_groups": groups_body,
-                # Kept so older saved templates using {keywords_hint} still render.
-                "keywords_hint": hint,
-            }
-            rendered, ents = render_dynamic_template(str(tpl.get("text") or ""), tpl.get("entities") or [], values)
-            media = tpl.get("media")
-            if media:
-                if edit:
-                    chat_id, message_id = edit
-                    try:
-                        await self.bot.delete_message(chat_id, message_id)
-                    except Exception:
-                        pass
-                await self.send_template_content(tg_id, rendered, ents, media, keywords_keyboard(lang, words, monitored), track_key=key)
-            else:
-                await self._send_or_edit(tg_id, rendered, keywords_keyboard(lang, words, monitored), edit, entities=ents, track_key=key)
-            return
-
-        await self._send_or_edit(tg_id, f"{title}\n\n{body}\n\n{hint}", keywords_keyboard(lang, words, monitored), edit, track_key=key)
+        values = {
+            "keywords_list": body,
+            "keywords_count": str(len(words)),
+            "monitored_groups": groups_body,
+            # Kept so older saved templates using {keywords_hint} still render.
+            "keywords_hint": hint,
+        }
+        await self.render_dynamic_screen(
+            tg_id, "keywords", lang, values, keywords_keyboard(lang, words, monitored), edit, key=f"keywords_{lang}",
+        )
 
     async def show_keyword_delete_menu(self, tg_id: int, lang: str, edit: tuple[int, int] | None = None) -> None:
         words = await self.db.list_keywords(tg_id)
@@ -2304,29 +2258,10 @@ class BotHandlers:
                 item_lines.append(f"<b>{e(r.get('chat_title') or '')}</b> — {e(r.get('sender_name') or '')}\n{e(body)[:500]}\n<code>{dt(r.get('created_at'))}</code>")
             deleted_list = "\n\n".join(item_lines)
 
-        key = f"deleted_{lang}"
-        tpl = await self.db.get_template(key)
-        if tpl:
-            values = {"deleted_messages_list": deleted_list, "deleted_count": str(len(rows))}
-            rendered, ents = render_dynamic_template(str(tpl.get("text") or ""), tpl.get("entities") or [], values)
-            media = tpl.get("media")
-            if media:
-                if edit:
-                    chat_id, message_id = edit
-                    try:
-                        await self.bot.delete_message(chat_id, message_id)
-                    except Exception:
-                        pass
-                await self.send_template_content(tg_id, rendered, ents, media, last_deleted_keyboard(lang, track_own), track_key=key)
-            else:
-                await self._send_or_edit(tg_id, rendered, last_deleted_keyboard(lang, track_own), edit, entities=ents, track_key=key)
-            return
-
-        if not rows:
-            await self._send_or_edit(tg_id, deleted_list, last_deleted_keyboard(lang, track_own), edit, track_key=key)
-            return
-        title = "👻 <b>Last deleted</b>" if lang == "en" else "👻 <b>Останні видалені</b>" if lang == "uk" else "👻 <b>Последние удалённые</b>"
-        await self._send_or_edit(tg_id, f"{title}\n\n{deleted_list}", last_deleted_keyboard(lang, track_own), edit, track_key=key)
+        values = {"deleted_messages_list": deleted_list, "deleted_count": str(len(rows))}
+        await self.render_dynamic_screen(
+            tg_id, "deleted", lang, values, last_deleted_keyboard(lang, track_own), edit, key=f"deleted_{lang}",
+        )
 
     def disappearing_guide_text(self, lang: str) -> str:
         if lang == "ru":
@@ -2408,61 +2343,10 @@ class BotHandlers:
             "normal_limit": str(normal_limit),
             "premium_days": str(premium_days),
         }
-        key = f"referrals_{lang}"
         keyboard = referral_keyboard(lang, self.bot_username(), tg_id)
-        tpl = await self.db.get_template(key)
-        if tpl:
-            rendered, ents = render_dynamic_template(str(tpl.get("text") or ""), tpl.get("entities") or [], values)
-            media = tpl.get("media")
-            if media:
-                if edit:
-                    chat_id, message_id = edit
-                    try:
-                        await self.bot.delete_message(chat_id, message_id)
-                    except Exception:
-                        pass
-                await self.send_template_content(tg_id, rendered, ents, media, keyboard, track_key=key)
-            else:
-                await self._send_or_edit(tg_id, rendered, keyboard, edit, entities=ents, track_key=key)
-            return
-
-        if lang == "en":
-            text = (
-                f"🤝 <b>Referral system</b>\n\n"
-                f"Invite friends and earn Premium days:\n"
-                f"• Normal referral: <b>+{e(normal_days)}d</b> (up to {e(normal_limit)})\n"
-                f"• Premium referral: <b>+{e(premium_days)}d</b>\n\n"
-                f"🔗 <b>Your link:</b>\n<code>{e(values['referral_link'])}</code>\n\n"
-                f"👥 Normal: <b>{e(values['normal_count'])}</b>\n"
-                f"💎 Premium: <b>{e(values['premium_count'])}</b>\n"
-                f"🎁 Days earned: <b>{e(values['bonus_days_total'])}</b>\n"
-                f"⏳ Access until: <b>{e(values['access_left'])}</b>"
-            )
-        elif lang == "ru":
-            text = (
-                f"🤝 <b>Реферальная система</b>\n\n"
-                f"Приглашай друзей и получай дни Premium:\n"
-                f"• Обычный реферал: <b>+{e(normal_days)} дн.</b> (до {e(normal_limit)})\n"
-                f"• Premium-реферал: <b>+{e(premium_days)} дн.</b>\n\n"
-                f"🔗 <b>Твоя ссылка:</b>\n<code>{e(values['referral_link'])}</code>\n\n"
-                f"👥 Обычных: <b>{e(values['normal_count'])}</b>\n"
-                f"💎 Premium: <b>{e(values['premium_count'])}</b>\n"
-                f"🎁 Заработано дней: <b>{e(values['bonus_days_total'])}</b>\n"
-                f"⏳ Доступ до: <b>{e(values['access_left'])}</b>"
-            )
-        else:
-            text = (
-                f"🤝 <b>Реферальна система</b>\n\n"
-                f"Запрошуй друзів і отримуй дні Premium:\n"
-                f"• Звичайний реферал: <b>+{e(normal_days)} дн.</b> (до {e(normal_limit)})\n"
-                f"• Premium-реферал: <b>+{e(premium_days)} дн.</b>\n\n"
-                f"🔗 <b>Твоє посилання:</b>\n<code>{e(values['referral_link'])}</code>\n\n"
-                f"👥 Звичайних: <b>{e(values['normal_count'])}</b>\n"
-                f"💎 Premium: <b>{e(values['premium_count'])}</b>\n"
-                f"🎁 Зароблено днів: <b>{e(values['bonus_days_total'])}</b>\n"
-                f"⏳ Доступ до: <b>{e(values['access_left'])}</b>"
-            )
-        await self._send_or_edit(tg_id, text, keyboard, edit, track_key=f"referrals_{lang}")
+        await self.render_dynamic_screen(
+            tg_id, "referrals", lang, values, keyboard, edit, key=f"referrals_{lang}",
+        )
 
     async def track_sent(self, result: Any, fallback_chat_id: int, track_key: str | None) -> None:
         """Record (chat_id, message_id) -> template_key for deterministic /edit.
@@ -2699,6 +2583,41 @@ class BotHandlers:
         elif data.startswith("admin_") or data.startswith("adm_") or data.startswith("bc_") or data.startswith("ub_"):
             await self.handle_admin_callback(tg_id, lang, data, edit)
 
+    async def render_dynamic_screen(
+        self,
+        tg_id: int,
+        base: str,
+        lang: str,
+        values: dict[str, str],
+        keyboard: dict[str, Any] | None,
+        edit: tuple[int, int] | None,
+        *,
+        key: str,
+        fallback_key: str | None = None,
+    ) -> None:
+        """Render a dynamic screen from a single source of truth.
+
+        Live screens and the /edit preview now both come from the same template
+        (the saved one if it exists, otherwise the built-in default), so what the
+        admin is asked to edit always matches what is actually on screen.
+        """
+        tpl = await self.db.get_template(key)
+        if tpl is None and fallback_key:
+            tpl = await self.db.get_template(fallback_key)
+        src = str((tpl or {}).get("text") or dynamic_template_default(base, lang))
+        src_ents = (tpl or {}).get("entities") or []
+        rendered, ents = render_dynamic_template(src, src_ents, values)
+        media = (tpl or {}).get("media")
+        if media:
+            if edit:
+                try:
+                    await self.bot.delete_message(edit[0], edit[1])
+                except Exception:
+                    pass
+            await self.send_template_content(tg_id, rendered, ents, media, keyboard, track_key=key)
+        else:
+            await self._send_or_edit(tg_id, rendered, keyboard, edit, entities=ents, track_key=key)
+
     async def callback_buy(self, tg_id: int, lang: str, plan_id: int, edit: tuple[int, int] | None) -> None:
         plan = await self.db.get_plan(plan_id)
         if not plan or not plan.get("is_active"):
@@ -2714,26 +2633,11 @@ class BotHandlers:
             # Kept so older saved templates using {amount_uah_line} still render.
             "amount_uah_line": amount_uah_line(amount_uah, lang),
         }
-        key = f"choose_payment_{lang}"
-        tpl = await self.db.get_template(key)
-        if tpl:
-            rendered, ents = render_dynamic_template(str(tpl.get("text") or ""), tpl.get("entities") or [], values)
-            media = tpl.get("media")
-            if media:
-                if edit:
-                    chat_id, message_id = edit
-                    try:
-                        await self.bot.delete_message(chat_id, message_id)
-                    except Exception:
-                        pass
-                await self.send_template_content(tg_id, rendered, ents, media, payment_methods_keyboard(lang, plan_id, methods), track_key=key)
-            else:
-                await self._send_or_edit(tg_id, rendered, payment_methods_keyboard(lang, plan_id, methods), edit, entities=ents, track_key=key)
-            return
-        text = tr(lang, "choose_payment", plan=e(values["plan_name"]), price=e(values["amount_usd"]))
-        if amount_uah is not None:
-            text += "\n" + amount_uah_line(amount_uah, lang)
-        await self._send_or_edit(tg_id, text, payment_methods_keyboard(lang, plan_id, methods), edit, track_key=key)
+        await self.render_dynamic_screen(
+            tg_id, "choose_payment", lang, values,
+            payment_methods_keyboard(lang, plan_id, methods), edit,
+            key=f"choose_payment_{lang}",
+        )
 
     async def callback_pay(self, tg_id: int, lang: str, plan_id: int, method_code: str, edit: tuple[int, int] | None) -> None:
         plan = await self.db.get_plan(plan_id)
@@ -2798,27 +2702,11 @@ class BotHandlers:
         }
         # Per-method key so editing the TON screen does not change card/TRC20/BEP20.
         key = f"payment_manual_{method_code}_{lang}"
-        tpl = await self.db.get_template(key) or await self.db.get_template(f"payment_manual_{lang}")
-        if tpl:
-            rendered, ents = render_dynamic_template(str(tpl.get("text") or ""), tpl.get("entities") or [], values)
-            media = tpl.get("media")
-            if media:
-                if edit:
-                    chat_id, message_id = edit
-                    try:
-                        await self.bot.delete_message(chat_id, message_id)
-                    except Exception:
-                        pass
-                await self.send_template_content(tg_id, rendered, ents, media, manual_payment_keyboard(lang, int(payment["id"])), track_key=key)
-            else:
-                await self._send_or_edit(tg_id, rendered, manual_payment_keyboard(lang, int(payment["id"])), edit, entities=ents, track_key=key)
-            return
-        text = tr(lang, "payment_manual", plan=e(values["plan_name"]), amount=e(amount), instructions=method_instructions(method, lang))
-        if method_code == "ua_card" and amount_uah is not None:
-            text = text.replace(f"💰 <b>Сума:</b> ${e(amount)}", f"💰 <b>Сума:</b> ${e(amount)}\n{amount_uah_line(amount_uah, lang)}")
-            text = text.replace(f"💰 <b>Сумма:</b> ${e(amount)}", f"💰 <b>Сумма:</b> ${e(amount)}\n{amount_uah_line(amount_uah, lang)}")
-            text = text.replace(f"💰 <b>Amount:</b> ${e(amount)}", f"💰 <b>Amount:</b> ${e(amount)}\n{amount_uah_line(amount_uah, lang)}")
-        await self._send_or_edit(tg_id, text, manual_payment_keyboard(lang, int(payment["id"])), edit, track_key=key)
+        await self.render_dynamic_screen(
+            tg_id, "payment_manual", lang, values,
+            manual_payment_keyboard(lang, int(payment["id"])), edit,
+            key=key, fallback_key=f"payment_manual_{lang}",
+        )
 
     async def callback_check_crypto(self, tg_id: int, lang: str, payment_id: int, edit: tuple[int, int] | None) -> None:
         payment = await self.db.get_payment(payment_id)
