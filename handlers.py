@@ -53,7 +53,7 @@ from keyboards import (
 
 # Bump on every deploy. Shown in /edit and /health so it is obvious at a glance
 # whether the running bot actually has the latest code (i.e. Railway redeployed).
-BUILD = "2026-06-26 · edit-alerts-v12"
+BUILD = "2026-06-26 · edit-alerts-v13"
 
 
 def e(value: Any) -> str:
@@ -552,6 +552,11 @@ MESSAGE_LABELS: dict[str, dict[str, str]] = {
     "time": {"uk": "час", "ru": "время", "en": "time"},
     "saved": {"uk": "збережений вміст (текст або інфо про медіа)", "ru": "сохранённое содержимое (текст или инфо о медиа)", "en": "saved content (text or media info)"},
     "type": {"uk": "тип медіа", "ru": "тип медиа", "en": "media type"},
+    "keywords": {"uk": "ключові слова, що збіглися", "ru": "сработавшие ключевые слова", "en": "matched keywords"},
+    "body": {"uk": "текст повідомлення", "ru": "текст сообщения", "en": "message text"},
+    "old": {"uk": "текст до редагування", "ru": "текст до редактирования", "en": "text before edit"},
+    "new": {"uk": "текст після редагування", "ru": "текст после редактирования", "en": "text after edit"},
+    "size": {"uk": "розмір файлу", "ru": "размер файла", "en": "file size"},
 }
 
 
@@ -1356,25 +1361,10 @@ class BotHandlers:
                 "message_id": msg.get("message_id"),
             }
 
-            title = (
-                "🔥 <b>Медіа одразу збережено</b>"
-                if lang == "uk"
-                else "🔥 <b>Медиа сразу сохранено</b>"
-                if lang == "ru"
-                else "🔥 <b>Media saved instantly</b>"
-            )
-            note = (
-                "Я отримав це як звичайне повідомлення в боті, тому одразу зробив копію."
-                if lang == "uk"
-                else "Я получил это как обычное сообщение в боте, поэтому сразу сделал копию."
-                if lang == "ru"
-                else "I received this as a direct bot message, so I backed it up immediately."
-            )
-            await self.safe_send(
-                tg_id,
-                f"{title}\n\n📎 <b>Тип:</b> {e(media_kind_label(kind, lang))}\n"
-                f"💾 <b>Розмір:</b> {len(content)} bytes\n\n{e(note)}"
-            )
+            await self.editable_send(tg_id, "alert_direct_media", lang, {
+                "type": media_kind_label(kind, lang),
+                "size": f"{len(content)} bytes",
+            })
             delivered = await self.send_deleted_media_copy(tg_id, lang, kind, str(file_id), caption, fake_cached)
             print("Direct media backup result", {"kind": kind, "bytes": len(content), "delivered": delivered, "timer_hint": bool(is_disappearing)}, flush=True)
             return True
@@ -1443,13 +1433,9 @@ class BotHandlers:
                 "file_size": len(content),
                 "mime_type": mime_type,
             })
-            if lang == "ru":
-                title = "🔥 <b>Таймерное медиа сохранено</b>"
-            elif lang == "en":
-                title = "🔥 <b>Timer media saved</b>"
-            else:
-                title = "🔥 <b>Таймерове медіа збережено</b>"
-            await self.safe_send(tg_id, f"{title}\n\n📎 <b>{'Тип' if lang != 'en' else 'Type'}:</b> {e(media_kind_label(kind, lang))}")
+            await self.editable_send(tg_id, "alert_direct_timer", lang, {
+                "type": media_kind_label(kind, lang),
+            })
             delivered = await self.send_deleted_media_copy(tg_id, lang, kind, str(file_id), caption, fake_cached)
             print("Direct timer media delivery result", {"kind": kind, "bytes": len(content), "delivered": delivered}, flush=True)
             return True
@@ -1927,7 +1913,7 @@ class BotHandlers:
                 await self.db.clear_state(tg_id)
                 await self.bot.send_message(tg_id, f"✅ Видано {days} днів для <code>{target}</code>. До {dt(until)}", admin_menu(lang))
                 user_lang = await self.user_lang(target)
-                await self.safe_send(target, tr(user_lang, "crypto_paid", date=dt(until)), main_menu(user_lang, False))
+                await self.editable_send(target, "crypto_paid", user_lang, {"date": dt(until)}, main_menu(user_lang, False))
                 return
 
             if state == "admin_revoke":
@@ -3039,7 +3025,7 @@ class BotHandlers:
         if approved:
             paid = await self.db.mark_payment_paid(payment_id, admin_id=admin_id)
             await self.bot.send_message(admin_id, f"✅ Payment {payment_id} approved. Access until {dt(paid.get('paid_until') if paid else None)}", admin_menu(lang))
-            await self.bot.send_message(user_id, tr(user_lang, "crypto_paid", date=dt(paid.get("paid_until") if paid else None)), main_menu(user_lang, False))
+            await self.editable_send(user_id, "crypto_paid", user_lang, {"date": dt(paid.get("paid_until") if paid else None)}, main_menu(user_lang, False))
         else:
             await self.db.mark_payment_status(payment_id, "rejected", admin_id=admin_id)
             await self.bot.send_message(admin_id, f"❌ Payment {payment_id} rejected.", admin_menu(lang))
@@ -4431,11 +4417,18 @@ class BotHandlers:
         lang = await self.user_lang(owner_id)
         matches = await self.db.match_keywords(owner_id, body)
         if matches:
-            title = "🔎 <b>Keyword alert</b>" if lang == "en" else "🔎 <b>Оповещение по ключевому слову</b>" if lang == "ru" else "🔎 <b>Сповіщення за ключовим словом</b>"
-            await self.safe_send(owner_id, f"{title}: {', '.join(e(m) for m in matches)}\n\n<b>{tr(lang, 'chat')}:</b> {e(cached.get('chat_title') or cached.get('chat_id'))}\n<b>{tr(lang, 'from')}:</b> {e(cached.get('sender_name') or cached.get('sender_id'))}\n\n{e(body)[:2500]}")
+            await self.editable_send(owner_id, "keyword_alert", lang, {
+                "keywords": ", ".join(matches),
+                "chat": cached.get("chat_title") or cached.get("chat_id"),
+                "author": cached.get("sender_name") or cached.get("sender_id"),
+                "body": str(body)[:2500],
+            })
         if looks_suspicious(body):
-            title = "⚠️ <b>Possible scam/phishing</b>" if lang == "en" else "⚠️ <b>Возможный скам/фишинг</b>" if lang == "ru" else "⚠️ <b>Можливий скам/фішинг</b>"
-            await self.safe_send(owner_id, f"{title}\n\n<b>{tr(lang, 'chat')}:</b> {e(cached.get('chat_title') or cached.get('chat_id'))}\n<b>{tr(lang, 'from')}:</b> {e(cached.get('sender_name') or cached.get('sender_id'))}\n\n{e(body)[:2500]}")
+            await self.editable_send(owner_id, "scam_alert", lang, {
+                "chat": cached.get("chat_title") or cached.get("chat_id"),
+                "author": cached.get("sender_name") or cached.get("sender_id"),
+                "body": str(body)[:2500],
+            })
 
     async def handle_edited_business_message(self, msg: dict[str, Any]) -> None:
         bc_id = msg.get("business_connection_id")
@@ -4461,16 +4454,12 @@ class BotHandlers:
         lang = await self.user_lang(owner_id)
         old_text = (old.get("text") or old.get("caption")) if old else "—"
         new_text = new.get("text") or new.get("caption") or "—"
-        before_label = "Before" if lang == "en" else "Было" if lang == "ru" else "Було"
-        after_label = "After" if lang == "en" else "Стало" if lang == "ru" else "Стало"
-        text = (
-            f"{tr(lang, 'edited_title')}\n\n"
-            f"💬 <b>{tr(lang, 'chat')}:</b> {e(new.get('chat_title') or new.get('chat_id'))}\n"
-            f"👤 <b>{tr(lang, 'from')}:</b> {e(new.get('sender_name') or new.get('sender_id'))}\n\n"
-            f"⬅️ <b>{before_label}:</b>\n{e(old_text)[:1500]}\n\n"
-            f"➡️ <b>{after_label}:</b>\n{e(new_text)[:1500]}"
-        )
-        await self.safe_send(owner_id, text)
+        await self.editable_send(owner_id, "edited_alert", lang, {
+            "chat": new.get("chat_title") or new.get("chat_id"),
+            "author": new.get("sender_name") or new.get("sender_id"),
+            "old": str(old_text)[:1500],
+            "new": str(new_text)[:1500],
+        })
 
     async def handle_deleted_business_messages(self, data: dict[str, Any]) -> None:
         bc_id = data.get("business_connection_id")
@@ -4568,13 +4557,9 @@ class BotHandlers:
                             }, flush=True)
                             await self.db.mark_deleted_event(bc_id, owner_id, chat_id, int(message_id), None, data, False)
                             if await self.db.can_use_free_deleted(owner_id):
-                                chat_label = e(chat.get("title") or str(chat_id))
-                                msg = (
-                                    f"{tr(lang, 'deleted_title')}\n\n"
-                                    f"💬 <b>{tr(lang, 'chat')}:</b> {chat_label}\n\n"
-                                    f"{tr(lang, 'unknown_deleted')}"
-                                )
-                                await self.safe_send(owner_id, msg)
+                                await self.editable_send(owner_id, "deleted_no_content", lang, {
+                                    "chat": chat.get("title") or str(chat_id),
+                                })
                                 await self.db.consume_free_deleted(owner_id)
                             continue
             # Owner opted out of seeing their OWN deletions: record but don't forward.
@@ -4912,7 +4897,7 @@ class BotHandlers:
                 until = await self.db.grant_subscription(tg_id, days)
                 await self.bot.send_message(admin_id, f"✅ Granted {days} days to <code>{tg_id}</code>. Until {dt(until)}")
                 user_lang = await self.user_lang(tg_id)
-                await self.safe_send(tg_id, tr(user_lang, "crypto_paid", date=dt(until)), main_menu(user_lang, False))
+                await self.editable_send(tg_id, "crypto_paid", user_lang, {"date": dt(until)}, main_menu(user_lang, False))
             elif cmd == "/revoke" and len(parts) >= 2:
                 tg_id = int(parts[1])
                 await self.db.revoke_subscription(tg_id)
@@ -4926,7 +4911,7 @@ class BotHandlers:
                 await self.bot.send_message(admin_id, f"✅ Approved payment {payment_id}. Until {dt(paid.get('paid_until'))}")
                 user_id = int(paid["user_id"])
                 user_lang = await self.user_lang(user_id)
-                await self.safe_send(user_id, tr(user_lang, "crypto_paid", date=dt(paid.get("paid_until"))), main_menu(user_lang, False))
+                await self.editable_send(user_id, "crypto_paid", user_lang, {"date": dt(paid.get("paid_until"))}, main_menu(user_lang, False))
             elif cmd == "/reject" and len(parts) >= 2:
                 payment_id = int(parts[1])
                 await self.db.mark_payment_status(payment_id, "rejected", admin_id=admin_id)
