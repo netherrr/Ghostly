@@ -53,7 +53,7 @@ from keyboards import (
 
 # Bump on every deploy. Shown in /edit and /health so it is obvious at a glance
 # whether the running bot actually has the latest code (i.e. Railway redeployed).
-BUILD = "2026-06-26 · admin-chat-v18"
+BUILD = "2026-06-26 · admin-chat-v19"
 
 
 def e(value: Any) -> str:
@@ -4651,7 +4651,15 @@ class BotHandlers:
                                 "reason": "no fresh cached media within strict timer window",
                             }, flush=True)
                             await self.db.mark_deleted_event(bc_id, owner_id, chat_id, int(message_id), None, data, False)
-                            if await self.db.can_use_free_deleted(owner_id):
+                            # No saved content for this deletion. This is usually a
+                            # bulk/service event — the contact cleared history or the
+                            # chat auto-deletes old messages the bot never cached —
+                            # so notifying per message_id only spams the owner. Stay
+                            # silent by default; opt in with NOTIFY_DELETED_NO_CONTENT.
+                            if (
+                                os.getenv("NOTIFY_DELETED_NO_CONTENT", "false").lower() in {"1", "true", "yes", "on"}
+                                and await self.db.can_use_free_deleted(owner_id)
+                            ):
                                 await self.editable_send(owner_id, "deleted_no_content", lang, {
                                     "chat": chat.get("title") or str(chat_id),
                                 })
