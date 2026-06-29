@@ -305,6 +305,7 @@ This build keeps timer-only behavior but adds safe media-only logs by default:
 - `GHOSTLY_MEDIA_DEBUG=true` logs whether Telegram sent `business_message`/`message` media and `file_id`.
 - It does not log message text/captions.
 - `NOTIFY_MISSED_TIMER_MEDIA=false` by default, so users do not see annoying failure warnings when Telegram sends only a deletion event without a file.
+- `NOTIFY_DELETED_NO_CONTENT=false` by default: when Telegram reports a deletion the bot has no saved content for (the contact cleared chat history, or the chat auto-deletes old messages from before the connection), the event is recorded silently instead of spamming one "I saw a deletion but saved nothing" message per id. Set to `true` to get those notices back.
 - If a timer photo/video is not delivered, check Railway for `GHOSTLY_MEDIA_DEBUG`, `Media cached bytes`, `Timer media instant not triggered`, and `Timer media instant delivery result`.
 
 
